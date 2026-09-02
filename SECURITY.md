@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a potential security vulnerability in tsicsparser, please report it responsibly. Do not disclose the issue publicly until it has been addressed.
+If you discover a potential security vulnerability in tscommit, please report it responsibly. Do not disclose the issue publicly until it has been addressed.
 
 - Contact: Send an email with all relevant details (including steps to reproduce) to security at thorsphere dot com.
 - Response Time: You can expect an acknowledgment within a few days.
