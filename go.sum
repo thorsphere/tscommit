@@ -1,5 +1,7 @@
-github.com/thorsphere/tserr v1.21.2 h1:NV0CgRFqSfnKLG+QpiQjcPHTmq9og3GhRpTh8C7KQ9k=
-github.com/thorsphere/tserr v1.21.2/go.mod h1:HNwkx0FJadlmVVkkuEzbCIS7s0QvAi+kwaFF2frDJtw=
+github.com/thorsphere/lpcli v1.0.2 h1:PJdC2OFtThUc6WAlBZf3AKI/cjxg0NLbQ8Seewn6TLo=
+github.com/thorsphere/lpcli v1.0.2/go.mod h1:Xf+jvs54Bk3WL6JzUGMMlza1IH4wYJiIjGDZmq1Fpow=
+github.com/thorsphere/tserr v1.21.7 h1:9cMmVRsrTs7ck8pBJ3B+uZsEmzhDJFk110w3Ubv7H5s=
+github.com/thorsphere/tserr v1.21.7/go.mod h1:ntnzXWuuyZYUYT3n/i+1V0xKmn43oyaZC8gvSQTItcw=
 github.com/thorsphere/tsfio v1.9.0 h1:3XkQVhfQBBYQq3kbpbY5I6GR0HxSAa/1NCEcSV9p854=
 github.com/thorsphere/tsfio v1.9.0/go.mod h1:BC+z8MPZI/pUaeIJJi+kE4AfKWHKCWub2nYVQCTTDbg=
 github.com/thorsphere/tslog v1.4.0 h1:fizPuc7uo+E9/y4NCNzf+049Cihx96sVQTO2pF0IXQk=
