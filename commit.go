@@ -3,7 +3,11 @@
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 package tscommit
 
-import "context"
+import (
+	"context"
+
+	"github.com/thorsphere/tserr"
+)
 
 // Run executes the tscommit workflow using context.Background().
 func Run(apiKey string) error {
@@ -14,6 +18,7 @@ func Run(apiKey string) error {
 // reads the staged diff, generates a commit message via OpenRouter, and creates the commit.
 func RunContext(ctx context.Context, apiKey string) error {
 	cfg := DefaultConfig()
+	p := newPrompter()
 
 	diff, err := stagedDiff(ctx, 30000)
 	if err != nil {
@@ -25,5 +30,28 @@ func RunContext(ctx context.Context, apiKey string) error {
 		return err
 	}
 
-	return commit(ctx, msg)
+	for {
+		choice, err := promptUser(ctx, p, msg)
+		if err != nil {
+			return err
+		}
+
+		switch choice {
+		case choiceAccept:
+			return commit(ctx, msg)
+		case choiceEdit:
+			edited, err := editInEditor(ctx, p, msg)
+			if err != nil {
+				return err
+			}
+			msg = edited
+		case choiceRegenerate:
+			msg, err = genMessage(ctx, cfg.withAPIKey(apiKey), diff)
+			if err != nil {
+				return err
+			}
+		case choiceCancel:
+			return tserr.Aborted("commit cancelled")
+		}
+	}
 }
