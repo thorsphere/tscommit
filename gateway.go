@@ -1,19 +1,21 @@
 // Copyright (c) 2026 thorsphere.
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
+
 package tscommit
 
+// Import packages
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"strings"
-	"time"
+	"bytes"         // Import the bytes package for byte slices.
+	"context"       // Import the context package for context handling.
+	"encoding/json" // Import the json package for JSON encoding/decoding.
+	"fmt"           // Import the fmt package for formatting.
+	"io"            // Import the io package for input/output.
+	"net/http"      // Import the http package for HTTP requests.
+	"strings"       // Import the strings package for string manipulation.
+	"time"          // Import the time package for time handling.
 
-	"github.com/thorsphere/tserr"
+	"github.com/thorsphere/tserr" // Import the tserr package for error handling.
 )
 
 var defaultHTTPClient = &http.Client{
@@ -47,6 +49,34 @@ type apiErrorResponse struct {
 func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
 	prompt := buildPrompt(diff)
 
+	content, err := chatOnce(ctx, cfg, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	if err := validateMessage(content); err != nil {
+		retryPrompt := prompt +
+			"\n\nYour previous output was invalid: " + err.Error() +
+			"\nRegenerate the commit message following STRICT FORMAT RULES exactly."
+		content, err = chatOnce(ctx, cfg, retryPrompt)
+		if err != nil {
+			return "", err
+		}
+		if err := validateMessage(content); err != nil {
+			return "", tserr.Op(&tserr.OpArgs{
+				Op:  "validate message",
+				Fn:  "OpenRouter",
+				Err: err,
+			})
+		}
+	}
+
+	return content, nil
+}
+
+// chatOnce performs a single OpenRouter chat completion and returns the
+// cleaned message content.
+func chatOnce(ctx context.Context, cfg *config, prompt string) (string, error) {
 	payload := requestPayload{
 		Model:    cfg.model,
 		Messages: []message{{Role: "user", Content: prompt}},
@@ -105,34 +135,33 @@ func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
 		return "", tserr.Empty("OpenRouter response")
 	}
 
-    content := cleanMessage(res.Choices[0].Message.Content)
-    if content == "" {
-        return "", tserr.Empty("OpenRouter commit message")
-    }
+	content := cleanMessage(res.Choices[0].Message.Content)
+	if content == "" {
+		return "", tserr.Empty("OpenRouter commit message")
+	}
 
-    return content, nil
+	return content, nil
 }
-
 
 // cleanMessage removes markdown code fences, backticks, and extra wrapper formatting.
 func cleanMessage(s string) string {
-    s = strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
 
-    // Strip outer markdown code block fences (e.g. ```commit ... ``` or ``` ...)
-    if strings.HasPrefix(s, "```") {
-        // Remove opening fence and optional language tag up to newline
-        if idx := strings.Index(s, "\n"); idx != -1 {
-            s = s[idx+1:]
-        } else {
-            s = strings.TrimPrefix(s, "```")
-        }
+	// Strip outer markdown code block fences (e.g. ```commit ... ``` or ``` ...)
+	if strings.HasPrefix(s, "```") {
+		// Remove opening fence and optional language tag up to newline
+		if idx := strings.Index(s, "\n"); idx != -1 {
+			s = s[idx+1:]
+		} else {
+			s = strings.TrimPrefix(s, "```")
+		}
 
-        // Remove trailing fence
-        s = strings.TrimSuffix(strings.TrimSpace(s), "```")
-    }
+		// Remove trailing fence
+		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
+	}
 
-    // Strip outer single or double quotes / backticks if wrapped
-    s = strings.Trim(strings.TrimSpace(s), "`\"'")
+	// Strip outer single or double quotes / backticks if wrapped
+	s = strings.Trim(strings.TrimSpace(s), "`\"'")
 
-    return strings.TrimSpace(s)
+	return strings.TrimSpace(s)
 }
