@@ -9,7 +9,7 @@ import (
 	"bytes"         // Import the bytes package for byte slices.
 	"context"       // Import the context package for context handling.
 	"encoding/json" // Import the json package for JSON encoding/decoding.
-	"fmt"           // Import the fmt package for formatting.
+	"errors"        // Import the errors package for error construction.
 	"io"            // Import the io package for input/output.
 	"net/http"      // Import the http package for HTTP requests.
 	"strings"       // Import the strings package for string manipulation.
@@ -113,26 +113,23 @@ func chatOnce(ctx context.Context, cfg *config, prompt string) (string, error) {
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		var errRes apiErrorResponse
 		if err := json.Unmarshal(respBody, &errRes); err == nil && errRes.Error.Message != "" {
-			return "", tserr.Op(&tserr.OpArgs{
-				Op:  fmt.Sprintf("status %d (%s)", resp.StatusCode, errRes.Error.Message),
-				Fn:  "OpenRouter",
-				Err: fmt.Errorf("API error: %s", errRes.Error.Message),
+			return "", tserr.NotAvailable(&tserr.NotAvailableArgs{
+				S:   "OpenRouter",
+				Err: errors.New(errRes.Error.Message),
 			})
 		}
-		return "", tserr.Op(&tserr.OpArgs{
-			Op:  fmt.Sprintf("status %d", resp.StatusCode),
-			Fn:  "OpenRouter",
-			Err: fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody))),
+		return "", tserr.StatusNotMatching(&tserr.StatusNotMatchingArgs{
+			Expected: http.StatusOK, Actual: resp.StatusCode,
 		})
 	}
 
 	var res responsePayload
-	if err := json.Unmarshal(respBody, &res); err != nil || len(res.Choices) == 0 {
+	if err := json.Unmarshal(respBody, &res); err != nil {
 		return "", tserr.Op(&tserr.OpArgs{Op: "unmarshal", Fn: "string(respBody)", Err: err})
 	}
 
 	if len(res.Choices) == 0 {
-		return "", tserr.Empty("OpenRouter response")
+		return "", tserr.Empty("OpenRouter response choices")
 	}
 
 	content := cleanMessage(res.Choices[0].Message.Content)

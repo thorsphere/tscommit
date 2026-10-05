@@ -62,7 +62,7 @@ func editInEditor(ctx context.Context, p *lpcli.Prompter, initialText string) (s
 		return "", err
 	}
 	if strings.TrimSpace(edited) == "" {
-		return "", tserr.Empty("commit message is empty after edit")
+		return "", tserr.Empty("commit message after edit")
 	}
 	return edited, nil
 }

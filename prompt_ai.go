@@ -11,7 +11,7 @@ STRICT FORMAT RULES:
    - Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore.
    - Scope: optional, lowercase, derived from the primary package/directory changed (e.g. "git", "gateway").
    - Use imperative, present tense ("rename" not "renamed").
-   - Max 50 characters; no trailing period.
+   - Max 72 characters; no trailing period.
    - Summarize the single dominant intent, not a file-by-file list.
 2. Blank Line: exactly one empty line between header and body.
 3. Body: wrapped at 72 characters. Explain WHAT changed, WHY (intent,

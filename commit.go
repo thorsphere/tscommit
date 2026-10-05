@@ -51,7 +51,7 @@ func RunContext(ctx context.Context, apiKey string) error {
 				return err
 			}
 		case choiceCancel:
-			return tserr.Aborted("commit cancelled")
+			return tserr.Aborted("commit")
 		}
 	}
 }
