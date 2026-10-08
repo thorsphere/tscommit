@@ -35,17 +35,24 @@ func stagedDiff(ctx context.Context, maxLen int) (string, error) {
 	return diff, nil
 }
 
+// recentCommits returns the last 5 commit subjects, truncated to maxLen bytes.
+// Returns an empty string if nothing is staged.
 func recentCommits(ctx context.Context, maxLen int) (string, error) {
 	// Retrieve the recent commits using the flags -n 5 and -format.
 	// -n 5 limits the number of commits to 5.
 	// -format specifies the format of the output.
-	outRecent, err := exec.CommandContext(ctx, "git", "log", "-n", "5", "--format=\"%s\"").Output()
+	outRecent, err := exec.CommandContext(ctx, "git", "log", "-n", "5", "--format=%s").Output()
 	// If an error occurs, return an error.
 	if err != nil {
 		return "", tserr.Op(&tserr.OpArgs{Op: "log", Fn: "git", Err: err})
 	}
 	// Return the recent commits and no error to indicate success.
 	recent := string(outRecent)
+	// Truncate the recent commits to maxLen bytes.
+	if len(recent) > maxLen {
+		recent = recent[:maxLen] + "\n... (truncated)"
+	}
+	// Return the recent commits and no error to indicate success.
 	return recent, nil
 }
 
