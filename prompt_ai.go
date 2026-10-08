@@ -25,7 +25,10 @@ STRICT FORMAT RULES:
 5. Footers (optional, one per line, trailer format "Token: value"):
    - "Refs #<issue>" when the diff context references an issue.
    - "BREAKING CHANGE: <description>" as described above.
-6. Output Format: raw plain text only. No markdown code blocks, quotes,
+6. Style: match the tone, terminology, and conventions of the recent
+   commit messages listed below. Use them as style reference only — do
+   not copy them, quote them, or mention them in the output.
+7. Output Format: raw plain text only. No markdown code blocks, quotes,
    or intro/outro commentary.
 
 Example output:
@@ -34,9 +37,16 @@ feat(git): add staged-diff truncation
 Large diffs previously overflowed the prompt window. Truncate at 30k
 bytes on a line boundary so hunks stay parseable.
 
-Diff:
+Recent commit messages (style reference only):
 `
 
-func buildPrompt(diff string) string {
-	return promptTemplate + diff
+const diffSection = `
+
+Staged diff:
+`
+
+// buildPrompt assembles the AI prompt from recent commit subjects and the
+// staged diff.
+func buildPrompt(recent, diff string) string {
+	return promptTemplate + recent + diffSection + diff
 }
