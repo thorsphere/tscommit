@@ -25,12 +25,7 @@ func RunContext(ctx context.Context, apiKey string) error {
 		return err
 	}
 
-	recent, err := recentCommits(ctx, 2000) // error handling per your preference
-	if err != nil {
-		return err
-	}
-
-	msg, err := genMessage(ctx, cfg.withAPIKey(apiKey), diff, recent) // <-- initial message
+	msg, err := genMessage(ctx, cfg.withAPIKey(apiKey), diff)
 	if err != nil {
 		return err
 	}
@@ -51,7 +46,7 @@ func RunContext(ctx context.Context, apiKey string) error {
 			}
 			msg = edited
 		case choiceRegenerate:
-			msg, err = genMessage(ctx, cfg.withAPIKey(apiKey), diff, recent) // <-- `=`, not `:=`
+			msg, err = genMessage(ctx, cfg.withAPIKey(apiKey), diff)
 			if err != nil {
 				return err
 			}

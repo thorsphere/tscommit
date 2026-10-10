@@ -46,8 +46,8 @@ type apiErrorResponse struct {
 }
 
 // genMessage calls OpenRouter to produce a commit message for diff.
-func genMessage(ctx context.Context, cfg *config, diff, recent string) (string, error) {
-	prompt := buildPrompt(recent, diff)
+func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
+	prompt := buildPrompt(diff)
 
 	content, err := chatOnce(ctx, cfg, prompt)
 	if err != nil {
