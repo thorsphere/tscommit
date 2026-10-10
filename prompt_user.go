@@ -80,9 +80,15 @@ func editInEditor(ctx context.Context, p *lpcli.Prompter, initialText string) (s
 		return "", err
 	}
 	// If the user leaves the editor empty, return an error.
+	// Otherwise, return the edited message.
+	return checkEdited(edited)
+}
+
+// checkEdited returns the edited message, or an error if the user left it
+// empty (only whitespace).
+func checkEdited(edited string) (string, error) {
 	if strings.TrimSpace(edited) == "" {
 		return "", tserr.Empty("commit message after edit")
 	}
-	// Return the edited message and nil, to indicate success.
 	return edited, nil
 }

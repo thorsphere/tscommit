@@ -7,4 +7,5 @@ package tscommit
 var (
 	ValidateMessage   = validateMessage
 	HasBreakingChange = hasBreakingChange
+	CheckEdited       = checkEdited
 )
