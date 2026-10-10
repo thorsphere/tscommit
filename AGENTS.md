@@ -73,12 +73,25 @@ differ, and rules for one MUST NOT be applied to the other. One `main` package p
 - Format check: `gofmt -l .` (must output nothing)
 - Toolchain: latest Go toolchain (per `go.mod`)
 
-### 5. Deliberate Design Decisions — do NOT "fix" these
+### 5. Commit Messages
+- Commits in this repository follow strict Conventional Commits:
+  `<type>[scope][!]: <imperative description>` with a header ≤72 bytes,
+  a body wrapped at 72 explaining WHAT and WHY, and a
+  `BREAKING CHANGE:` footer when consumers must adapt.
+- When a format or contract is defined in multiple coupled places
+  (prompt template, validator, table-driven tests), a change MUST be
+  applied to all of them in the same commit — never one side alone.
+
+### 6. Deliberate Design Decisions — do NOT "fix" these
 - User-edited commit messages are intentionally NOT re-validated; after the
   user edits, their text is authoritative. `validateMessage` shapes AI
   output only.
 - Header length is measured in bytes (git/commitlint convention), not runes.
 - Trailing newlines are ignored during validation (git convention).
+- The commit format is intentionally specified in two places: the AI
+  prompt (`prompt_ai.go`) and the validator (`validate.go`). Do not
+  "deduplicate" them — the prompt is prose for the model, the validator
+  is code. Format changes must update both, plus `validate_test.go`.
 
 ---
 
