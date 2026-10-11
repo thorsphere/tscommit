@@ -54,9 +54,35 @@ differ, and rules for one MUST NOT be applied to the other. One `main` package p
   notice (FSL-1.1-ALv2, see any existing file) followed by the package clause.
 - **Imports:** Precede the import block with `// Import packages` and annotate
   every import inline, e.g. `"strings" // Import the strings package for string manipulation.`
-- **Comments:** Doc comment on every function (exported and unexported).
-  Narrate defensive steps inline: `// If the user cancels, return an error.`,
+- **Comments:** Doc comment on every declaration — functions (exported
+  and unexported), types, and package-level vars/consts. Narrate defensive
+  steps inline: `// If the user cancels, return an error.`,
   `// Return no error to indicate success.`
+- **Atomic lines:** Comment every code line that carries behavior of its
+  own (a call, assignment, branch, or return). Scaffolding lines (braces,
+  bare closures) may go without; const-block members each carry their own
+  trailing comment.
+- **Structs:** Doc comment above every struct declaration, and a purpose
+  comment appended to every field line, e.g.
+  `Model string // The model identifier for the request.`
+- **Consts, vars, and types:** Doc comments open with a complete sentence
+  naming the symbol. A type's doc comment states what each instance
+  represents or provides; document the zero value's meaning when it is
+  not obvious. Grouped consts or vars carry one doc comment for the
+  group plus a short end-of-line comment per member; ungrouped
+  declarations carry a full doc comment. Typed constants may lean on the
+  type's doc comment instead of a group comment. Vars follow the const
+  conventions.
+- **Function doc comments:** Begin with the function name and state the
+  contract, not the implementation: what the function returns, or — for
+  functions called for side effects — what it does. Refer to named
+  parameters and results directly by name, without backquotes. Name
+  results in the signature only when the comment must distinguish
+  multiple results; otherwise omit them. Use idiomatic openers:
+  "returns" for value-plus-error functions, "reports whether" for
+  booleans. A comment that merely restates the function name or narrates
+  implementation steps does not satisfy this rule — narration belongs on
+  the atomic lines inside the body.
 - **Errors:** Check every returned error. Never panic. Wrap with the
   appropriate `tserr` constructor.
 - **Tests:** External test package `<pkg>_test`. Bridge unexported
