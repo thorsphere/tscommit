@@ -10,13 +10,13 @@ import (
 	"io"      // Import the io package for I/O.
 )
 
-// Export functions for testing.
+// Exports for the external test package: bridges to unexported functions.
 var (
-	ValidateMessage   = validateMessage
-	HasBreakingChange = hasBreakingChange
-	CheckEdited       = checkEdited
-	StagedDiff        = stagedDiff
-	Commit            = commit
+	ValidateMessage   = validateMessage   // Validates a generated commit message.
+	HasBreakingChange = hasBreakingChange // Reports breaking-change markers.
+	CheckEdited       = checkEdited       // Validates a user-edited message.
+	StagedDiff        = stagedDiff        // Reads the staged git diff.
+	Commit            = commit            // Creates the git commit.
 )
 
 // SetExecGit swaps the git execution seam for tests and returns a restore
