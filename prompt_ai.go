@@ -4,6 +4,8 @@
 
 package tscommit
 
+// promptTemplate is the instruction text prepended to the staged diff when
+// asking the model to generate a commit message.
 const promptTemplate = `You are an expert Git commit assistant. Generate a high-quality commit message based on the staged diff below.
 
 STRICT FORMAT RULES:
