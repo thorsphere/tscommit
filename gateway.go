@@ -62,6 +62,14 @@ const maxGenAttempts = 2
 // message was truncated by the token limit.
 const finishReasonLength = "length"
 
+// finishReasonContentFilter is the provider finish reason indicating the
+// response was blocked by the provider's content filter.
+const finishReasonContentFilter = "content_filter"
+
+// finishReasonError is the provider finish reason indicating generation
+// failed on the provider side.
+const finishReasonError = "error"
+
 // genMessage calls the configured provider to produce a commit message for diff and returns it.
 // It attempts to generate a message up to maxGenAttempts times.
 // It returns an error if all attempts fail.
@@ -83,24 +91,26 @@ func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
 		if validateErr == nil && !res.truncated() {
 			return res.content, nil
 		}
-		// Report truncation as a failure when the truncated message validated.
-		if validateErr == nil {
-			validateErr = tserr.InvalidFormat(&tserr.InvalidFormatArgs{
-				F:      "commit message",
-				Value:  res.content,
-				Detail: "output was truncated by the token limit; keep the message concise",
-			})
+		// Build feedback from the validation failure and/or truncation.
+		var feedback string
+		// Report validation failure as a failure when the message is invalid.
+		if validateErr != nil {
+			feedback = "\n\nYour previous output was invalid: " + validateErr.Error()
 		}
-		// Record the failure for feedback.
+		// Explain truncation so the retry stays under the token limit.
+		if res.truncated() {
+			feedback += "\nYour previous output was cut off; be significantly more concise."
+		}
+		// Record the cause: prefer the validation error, fall back to truncation.
 		lastErr = validateErr
+		// Fall back to the truncation cause when the message itself validated.
+		if lastErr == nil {
+			lastErr = errors.New("output was truncated by the token limit")
+		}
 		// If attempts remain, ask the provider to fix its previous output.
 		if attempt < maxGenAttempts {
-			// Build corrective feedback for the retry prompt.
-			feedback := "\n\nYour previous output was invalid: " + validateErr.Error()
-			// Explain truncation so the retry stays under the token limit.
-			if res.truncated() {
-				feedback += "\nYour previous output was cut off; be significantly more concise."
-			}
+			// Build corrective feedback for the retry prompt, including the
+			// previous output and the generated message.
 			prompt = prompt +
 				feedback +
 				"\nPrevious output:\n" + res.content +
@@ -108,7 +118,7 @@ func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
 		}
 	}
 	// Return an error when all attempts produced invalid messages.
-	return "", tserr.Op(&tserr.OpArgs{Op: "validate message", Fn: cfg.provider.name, Err: lastErr})
+	return "", tserr.Op(&tserr.OpArgs{Op: "generate message", Fn: cfg.provider.name, Err: lastErr})
 }
 
 // chatResult holds the outcome of a single chat completion. The zero value
@@ -201,6 +211,22 @@ func chatOnce(ctx context.Context, cfg *config, prompt string) (chatResult, erro
 	// Return empty string if no choices and an error.
 	if len(res.Choices) == 0 {
 		return chatResult{}, tserr.Empty(cfg.provider.name + " response choices")
+	}
+	// Reject responses the provider flagged as unusable; these are not
+	// retryable, so fail before the caller spends another attempt.
+	switch res.Choices[0].FinishReason {
+	case finishReasonContentFilter:
+		return chatResult{}, tserr.Op(&tserr.OpArgs{
+			Op:  "generate message",
+			Fn:  cfg.provider.name,
+			Err: errors.New("response blocked by content filter"),
+		})
+	case finishReasonError:
+		return chatResult{}, tserr.Op(&tserr.OpArgs{
+			Op:  "generate message",
+			Fn:  cfg.provider.name,
+			Err: errors.New("provider reported a generation error"),
+		})
 	}
 	// Clean message
 	content := cleanMessage(res.Choices[0].Message.Content)
