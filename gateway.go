@@ -8,8 +8,10 @@ package tscommit
 import (
 	"bytes"         // Import the bytes package for byte slices.
 	"context"       // Import the context package for context handling.
+	"crypto/rand"   // Import the rand package for cryptographic randomness.
 	"encoding/json" // Import the json package for JSON encoding/decoding.
 	"errors"        // Import the errors package for error construction.
+	"fmt"           // Import the fmt package for formatting.
 	"io"            // Import the io package for input/output.
 	"net/http"      // Import the http package for HTTP requests.
 	"strings"       // Import the strings package for string manipulation.
@@ -45,6 +47,7 @@ type responsePayload struct {
 		Message      message `json:"message"`       // The generated message for this choice.
 		FinishReason string  `json:"finish_reason"` // Why generation stopped, e.g. "stop" or "length".
 	} `json:"choices"` // The completion choices returned by the model.
+	Usage usage `json:"usage"` // The token accounting for the completion.
 }
 
 // apiErrorResponse is the provider error body returned for non-2xx responses.
@@ -53,6 +56,22 @@ type apiErrorResponse struct {
 		Message string      `json:"message"` // The human-readable error message.
 		Code    interface{} `json:"code"`    // The provider-specific error code.
 	} `json:"error"` // The error details.
+}
+
+// usageDetails breaks down the completion tokens by kind. The zero value
+// means the provider reported no details.
+type usageDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"` // The reasoning tokens generated; zero means not reported.
+}
+
+// usage is the token accounting reported by the provider for one chat
+// completion. The zero value means the provider reported no usage.
+type usage struct {
+	PromptTokens     int          `json:"prompt_tokens"`             // The number of tokens in the prompt.
+	CompletionTokens int          `json:"completion_tokens"`         // The number of tokens in the completion.
+	TotalTokens      int          `json:"total_tokens"`              // The total number of tokens billed for the call.
+	Cost             float64      `json:"cost"`                      // The completion cost in USD; zero means not reported.
+	Details          usageDetails `json:"completion_tokens_details"` // The breakdown of the completion tokens.
 }
 
 // maxGenAttempts caps provider calls per message: 1 initial + retries with feedback.
@@ -70,17 +89,27 @@ const finishReasonContentFilter = "content_filter"
 // failed on the provider side.
 const finishReasonError = "error"
 
+// statusEdgeTimeout is the non-standard status code edge networks (e.g.
+// Cloudflare) return when the upstream provider timed out.
+const statusEdgeTimeout = 524
+
+// statusProviderOverloaded is the non-standard status code the provider
+// returns when its upstream is temporarily overloaded.
+const statusProviderOverloaded = 529
+
 // genMessage calls the configured provider to produce a commit message for diff and returns it.
 // It attempts to generate a message up to maxGenAttempts times.
+// The sessionID is passed to every provider call so retries and repeated
+// invocations for the same diff can share one provider endpoint and prompt cache.
 // It returns an error if all attempts fail.
-func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
+func genMessage(ctx context.Context, cfg *config, diff string, sessionID string) (string, error) {
 	// Build prompt
 	prompt := buildPrompt(diff)
 	// Attempt generation up to maxGenAttempts times.
 	var lastErr error
 	for attempt := 1; attempt <= maxGenAttempts; attempt++ {
 		// Call the provider to produce a commit message for diff.
-		res, err := chatOnce(ctx, cfg, prompt)
+		res, err := chatOnce(ctx, cfg, prompt, sessionID)
 		// Return the error if the provider call fails.
 		if err != nil {
 			return "", err
@@ -126,6 +155,7 @@ func genMessage(ctx context.Context, cfg *config, diff string) (string, error) {
 type chatResult struct {
 	content      string // The cleaned commit message produced by the model.
 	finishReason string // Why generation stopped, e.g. "stop" or "length".
+	usage        usage  // The token accounting reported for the call.
 }
 
 // truncated reports whether the model output was cut off by the token limit.
@@ -135,9 +165,11 @@ func (r chatResult) truncated() bool {
 }
 
 // chatOnce performs a single chat completion and returns the cleaned result.
-// It returns the zero result and an error if the call fails or the response is
-// unusable.
-func chatOnce(ctx context.Context, cfg *config, prompt string) (chatResult, error) {
+// The sessionID is sent as the provider's sticky routing key named by the
+// provider session key, so retries share one provider endpoint and can reuse
+// the prompt cache. It returns the zero result and an error if the call fails
+// or the response is unusable.
+func chatOnce(ctx context.Context, cfg *config, prompt string, sessionID string) (chatResult, error) {
 	// Build payload
 	payload := requestPayload{
 		Model:               cfg.model,
@@ -156,6 +188,15 @@ func chatOnce(ctx context.Context, cfg *config, prompt string) (chatResult, erro
 	// Return the zero result and an error if merging extra body fields fails.
 	if err != nil {
 		return chatResult{}, tserr.Op(&tserr.OpArgs{Op: "merge extra body", Fn: cfg.provider.name, Err: err})
+	}
+	// Attach the sticky routing key, overriding any static one in the extra
+	// body, when the provider names a session key and a session ID is set.
+	if cfg.provider.sessionKey != "" && sessionID != "" {
+		body, err = mergeExtraBody(body, map[string]any{cfg.provider.sessionKey: sessionID})
+		// Return the zero result and an error if merging the routing key fails.
+		if err != nil {
+			return chatResult{}, tserr.Op(&tserr.OpArgs{Op: "merge session key", Fn: cfg.provider.name, Err: err})
+		}
 	}
 	// Create request with body
 	req, err := http.NewRequestWithContext(ctx, "POST", cfg.provider.baseURL, bytes.NewBuffer(body))
@@ -190,17 +231,14 @@ func chatOnce(ctx context.Context, cfg *config, prompt string) (chatResult, erro
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		// Unmarshal error response
 		var errRes apiErrorResponse
-		if err := json.Unmarshal(respBody, &errRes); err == nil && errRes.Error.Message != "" {
-			// Return error if error message is not empty and use it as the error.
-			return chatResult{}, tserr.NotAvailable(&tserr.NotAvailableArgs{
-				S:   cfg.provider.name,
-				Err: errors.New(errRes.Error.Message),
-			})
+		// Parse the provider error body when possible.
+		parseErr := json.Unmarshal(respBody, &errRes)
+		// Return the provider error enriched with actionable advice.
+		if parseErr == nil && errRes.Error.Message != "" {
+			return chatResult{}, providerError(cfg.provider.name, resp.StatusCode, errRes)
 		}
-		// If error message is empty or unmarshalling fails, return status not matching error.
-		return chatResult{}, tserr.StatusNotMatching(&tserr.StatusNotMatchingArgs{
-			Expected: http.StatusOK, Actual: resp.StatusCode,
-		})
+		// Return a status error enriched with actionable advice.
+		return chatResult{}, statusError(cfg.provider.name, resp.StatusCode)
 	}
 	// Unmarshal response body
 	var res responsePayload
@@ -235,7 +273,11 @@ func chatOnce(ctx context.Context, cfg *config, prompt string) (chatResult, erro
 		return chatResult{}, tserr.Empty(cfg.provider.name + " commit message")
 	}
 	// Return the cleaned result.
-	return chatResult{content: content, finishReason: res.Choices[0].FinishReason}, nil
+	return chatResult{
+		content:      content,
+		finishReason: res.Choices[0].FinishReason,
+		usage:        res.Usage,
+	}, nil
 }
 
 // cleanMessage removes markdown code fences, backticks, and extra wrapper formatting.
@@ -281,4 +323,76 @@ func mergeExtraBody(base []byte, extra map[string]any) ([]byte, error) {
 	}
 	// Marshal the merged object.
 	return json.Marshal(obj)
+}
+
+// statusAdvice returns actionable, human-readable guidance for an HTTP status
+// returned by the provider. It returns an empty string when no specific
+// guidance applies.
+func statusAdvice(status int) string {
+	// Select guidance matching the status code.
+	switch status {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return "check the configured model and provider settings"
+	case http.StatusUnauthorized:
+		return "check that the API key is set correctly"
+	case http.StatusPaymentRequired:
+		return "insufficient credits; add credits to the provider account"
+	case http.StatusForbidden:
+		return "check the API key permissions for this model"
+	case http.StatusNotFound:
+		return "check the configured model name"
+	case http.StatusRequestEntityTooLarge:
+		return "reduce the staged diff size"
+	case http.StatusTooManyRequests:
+		return "rate limited; retry later"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout, statusEdgeTimeout:
+		return "the provider timed out; retry later"
+	case http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, statusProviderOverloaded:
+		return "the provider is temporarily unavailable; retry later"
+	}
+	// Return no guidance for other status codes.
+	return ""
+}
+
+// providerError returns an error for a non-2xx provider response, combining
+// the provider error code and message with actionable advice for the status.
+func providerError(name string, status int, errRes apiErrorResponse) error {
+	// Compose the detail from the provider error message.
+	detail := errRes.Error.Message
+	// Prefix the provider error code when one was reported.
+	if errRes.Error.Code != nil {
+		detail = fmt.Sprintf("%v: %s", errRes.Error.Code, detail)
+	}
+	// Append actionable advice when the status has one.
+	if advice := statusAdvice(status); advice != "" {
+		detail += "; " + advice
+	}
+	// Return the provider error wrapped with the provider name.
+	return tserr.NotAvailable(&tserr.NotAvailableArgs{S: name, Err: errors.New(detail)})
+}
+
+// statusError returns an error for a non-2xx provider response that carried no
+// usable error message. It prefers actionable advice for the status and falls
+// back to a status mismatch error.
+func statusError(name string, status int) error {
+	// Prefer actionable advice when the status has one.
+	if advice := statusAdvice(status); advice != "" {
+		return tserr.Op(&tserr.OpArgs{
+			Op:  "chat completion",
+			Fn:  name,
+			Err: fmt.Errorf("HTTP %d: %s", status, advice),
+		})
+	}
+	// Return the status mismatch error when no advice applies.
+	return tserr.StatusNotMatching(&tserr.StatusNotMatchingArgs{
+		Expected: http.StatusOK, Actual: status,
+	})
+}
+
+// newSessionID returns a fresh random identifier used as the sticky routing
+// key for one generation session.
+func newSessionID() string {
+	// Return a cryptographically random text identifier.
+	return rand.Text()
 }

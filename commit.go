@@ -25,7 +25,12 @@ func RunContext(ctx context.Context, apiKey string) error {
 		return err
 	}
 
-	msg, err := genMessage(ctx, cfg.withAPIKey(apiKey), diff)
+	// Generate one sticky routing key for the whole run so retries and
+	// regenerations land on the same provider endpoint and can reuse the
+	// prompt cache.
+	sessionID := newSessionID()
+
+	msg, err := genMessage(ctx, cfg.withAPIKey(apiKey), diff, sessionID)
 	if err != nil {
 		return err
 	}
@@ -46,7 +51,7 @@ func RunContext(ctx context.Context, apiKey string) error {
 			}
 			msg = edited
 		case choiceRegenerate:
-			msg, err = genMessage(ctx, cfg.withAPIKey(apiKey), diff)
+			msg, err = genMessage(ctx, cfg.withAPIKey(apiKey), diff, sessionID)
 			if err != nil {
 				return err
 			}

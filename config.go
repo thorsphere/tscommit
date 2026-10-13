@@ -22,6 +22,7 @@ type provider struct {
 	authValue     string            // The auth header prefix before the secret, e.g. "Bearer ".
 	staticHeaders map[string]string // Provider-specific headers sent with every request.
 	extraBody     map[string]any    // Provider-specific fields merged into the request body.
+	sessionKey    string            // The body field carrying the sticky routing key; empty disables it.
 }
 
 // config carries the settings for a commit message generation run.
@@ -48,6 +49,7 @@ var openRouterProvider = provider{
 	extraBody: map[string]any{
 		"reasoning_effort": defaultReasoningEffort,
 	},
+	sessionKey: "session_id", // Sticky routing key from the OpenRouter Chat API.
 }
 
 // DefaultConfig returns the configuration used when no overrides are applied.
