@@ -1,11 +1,15 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Create a report to help us improve (we do not accept pull requests)
 title: "[BUG]"
 labels: ''
 assignees: ''
 
 ---
+
+> **Note:** we do not accept code contributions via Pull Requests. See
+> CONTRIBUTING.md
+> for how we handle reports and other ways to contribute.
 
 **Describe the bug**
 A clear and concise description of what the bug is.
