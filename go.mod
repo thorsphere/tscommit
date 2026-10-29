@@ -4,7 +4,8 @@ go 1.27
 
 require (
 	github.com/thorsphere/lpcli v1.0.3
-	github.com/thorsphere/tserr v1.21.8
+	github.com/thorsphere/tsaiclient v1.0.0
+	github.com/thorsphere/tserr v1.21.11
 	github.com/thorsphere/tslog v1.4.0
 )
 
