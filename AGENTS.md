@@ -45,6 +45,7 @@ differ, and rules for one MUST NOT be applied to the other. One `main` package p
 
 ### 2. Quality & Hardening Standards
 - **Testing:** Every new feature or package function requires table-driven Unit Tests. Target >85% coverage.
+Error-presence assertions use tserr.NilFailed/NilExpected/Empty; value mismatches use tserr.EqualStr for strings and plain t.Errorf for composite values.
 - **Error Handling:** Explicit, idiomatic Go error handling. Do not panic. Wrap errors contextually where appropriate. Use the `tserr` package for error handling.
 - **Code Formatting:** Use `gofmt` to format Go code.
 - **Logging:** Service components: structured JSON logging to stdout (GCP Cloud Logging compatible) via tslog. CLI: human-readable output; tslog for diagnostics.
@@ -101,12 +102,13 @@ differ, and rules for one MUST NOT be applied to the other. One `main` package p
 
 ### 5. Commit Messages
 - Commits in this repository follow strict Conventional Commits:
-  `<type>[scope][!]: <imperative description>` with a header ≤72 bytes,
+  `<type>(<scope>)[!]: <imperative description>` with a header ≤72 bytes,
   a body wrapped at 72 explaining WHAT and WHY, and a
   `BREAKING CHANGE:` footer when consumers must adapt.
-- When a format or contract is defined in multiple coupled places
-  (prompt template, validator, table-driven tests), a change MUST be
-  applied to all of them in the same commit — never one side alone.
+- **Scope is mandatory:** Every commit header MUST include a parenthesized
+  scope — never omit `(<scope>)`.
+- When a format or contract is defined in multiple coupled places, a change MUST be
+  applied to all of them in the same commit, never one side alone.
 
 ### 6. Deliberate Design Decisions — do NOT "fix" these
 - User-edited commit messages are intentionally NOT re-validated; after the
