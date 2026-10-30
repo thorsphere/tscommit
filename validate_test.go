@@ -6,22 +6,22 @@ package tscommit_test
 
 // Imports for testing.
 import (
-	"fmt"
-	"strings"
-	"testing"
+	"fmt"     // Import the fmt package for formatting.
+	"strings" // Import the strings package for string handling.
+	"testing" // Import the testing package for testing.
 
-	"github.com/thorsphere/tscommit"
-	"github.com/thorsphere/tserr"
+	"github.com/thorsphere/tscommit" // Import the tscommit package for testing.
+	"github.com/thorsphere/tserr"    // Import the tserr package for error handling.
 )
 
-// header72 is exactly 72 bytes: "feat: " + 66 "a"s.
+// header72 is exactly 72 characters: "feat: " + 66 "a"s.
 var header72 = "feat: " + strings.Repeat("a", 66)
 
 // TestValidateMessageValid tests the ValidateMessage function with valid messages
 // It checks that the function returns nil for each message in the slice
 func TestValidateMessageValid(t *testing.T) {
 	msgs := []string{
-		"feat: xyz",     // single-character description
+		"feat: xyz",     // minimum-3-char boundary description
 		"feat: xyz\n",   // git-style trailing newline
 		"feat: xyz\n\n", // stray extra trailing newline
 		"fix: correct off-by-one in diff truncate",  // plain header
@@ -30,10 +30,11 @@ func TestValidateMessageValid(t *testing.T) {
 		"chore!: drop Go 1.20 support",              // unscoped breaking marker
 		"refactor(a-b/c.d): tidy scope charset",     // full scope charset
 		header72,                                    // header at the length limit
-		"feat: " + strings.Repeat("é", 33),          // 72 bytes — length counts bytes
+		"feat: " + strings.Repeat("é", 66),          // 72 characters — length counts characters
 		"feat: add thing\n\nExplain WHAT and WHY.",  // body after one blank line
 		"feat: add thing\n\nBody line.\n\nRefs #42", // body plus footer
 		"feat: add thing\n\nBody.\n\nBREAKING CHANGE: config keys renamed",
+		"feat: ééé", // 3 runes — min rule counts characters, not bytes
 	}
 	// for each message in the slice, call the function
 	for _, msg := range msgs {
@@ -61,20 +62,19 @@ func TestValidateMessageInvalid(t *testing.T) {
 		{"trailing space short", "feat: x "},
 		{"uppercase scope", "feat(Upper): x"},
 		{"scope with space", "feat(with space): x"},
-		{"missing blank line", "feat: x\nbody"},
-		{"header too long", "feat: " + strings.Repeat("a", 67)}, // 73 bytes
 		{"no blank line", "feat: x\nbody"},
-		{"two blank lines", "feat: x\n\n\nbody"},
 		{"three blank lines", "feat: x\n\n\n\nbody"},
-		{"single-char description", "feat: x"}, // min-3-char rule
-		{"two-char description", "feat: ab"},   // min-3-char rule
-		{"trailing space", "feat: add thing "}, // [^.\s]$ rule
-		{"trailing tab", "feat: add thing\t"},  // \s covers tabs too
-		// 73 bytes but only 68 runes — must be rejected because length is bytes.
-		{"byte-length limit", "feat: " + strings.Repeat("é", 67)}, // 6 + 134 = 140 bytes
-		{"missing blank line", "feat: add thing\nbody"},           // → "missing blank line between header and body"
-		{"two blank lines", "feat: add thing\n\n\nbody"},          // → "more than one blank line between header and body"
-		{"three blank lines", "feat: add thing\n\n\n\nbody"},      // → same second branch, extra blank line
+		{"single-char description", "feat: x"},                  // min-3-char rule
+		{"two-char description", "feat: ab"},                    // min-3-char rule
+		{"trailing space", "feat: add thing "},                  // [^.\s]$ rule
+		{"trailing tab", "feat: add thing\t"},                   // \s covers tabs too
+		{"missing blank line", "feat: add thing\nbody"},         // missing blank line between header and body
+		{"two blank lines", "feat: add thing\n\n\nbody"},        // more than one blank line between header and body
+		{"three blank lines", "feat: add thing\n\n\n\nbody"},    // same second branch, extra blank line
+		{"two-rune multibyte description", "feat: éé"},          // 2 runes — min-3 rule
+		{"header too long", "feat: " + strings.Repeat("a", 67)}, // 73 characters
+		// 73 characters (140 bytes) — rejected because length counts characters.
+		{"character-length limit", "feat: " + strings.Repeat("é", 67)}, // 6 + 67 = 73 characters
 	}
 	// for each test case in the slice, call the function
 	for _, tc := range cases {
