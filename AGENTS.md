@@ -102,19 +102,21 @@ Error-presence assertions use tserr.NilFailed/NilExpected/Empty; value mismatche
 
 ### 5. Commit Messages
 - Commits in this repository follow strict Conventional Commits:
-  `<type>(<scope>)[!]: <imperative description>` with a header ≤72 bytes,
-  a body wrapped at 72 explaining WHAT and WHY, and a
+  `<type>(<scope>)[!]: <imperative description>` with a header ≤72 characters,
+  a body wrapped at 72 characters explaining WHAT and WHY, and a
   `BREAKING CHANGE:` footer when consumers must adapt.
 - **Scope is mandatory:** Every commit header MUST include a parenthesized
   scope — never omit `(<scope>)`.
 - When a format or contract is defined in multiple coupled places, a change MUST be
   applied to all of them in the same commit, never one side alone.
+- Description at least 3 characters.
 
 ### 6. Deliberate Design Decisions — do NOT "fix" these
 - User-edited commit messages are intentionally NOT re-validated; after the
   user edits, their text is authoritative. `validateMessage` shapes AI
   output only.
-- Header length is measured in bytes (git/commitlint convention), not runes.
+- Header length is measured in characters (runes in Go), not bytes
+  (git/commitlint convention).
 - Trailing newlines are ignored during validation (git convention).
 - The commit format is intentionally specified in two places: the AI
   prompt (`prompt_ai.go`) and the validator (`validate.go`). Do not
