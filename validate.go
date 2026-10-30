@@ -6,8 +6,9 @@ package tscommit
 
 // Import packages
 import (
-	"regexp"  // Import the regexp package for regular expressions.
-	"strings" // Import the strings package for string manipulation.
+	"regexp"       // Import the regexp package for regular expressions.
+	"strings"      // Import the strings package for string manipulation.
+	"unicode/utf8" // Import the utf8 package to count runes in the description.
 
 	"github.com/thorsphere/tserr" // Import the tserr package for error handling.
 )
@@ -39,19 +40,23 @@ func validateMessage(msg string) error {
 			Detail: "must match <type>[scope]!: <imperative description> with no trailing period",
 		})
 	}
-	// Check that the description is at least 3 characters long.
-	if len(header)-strings.Index(header, ": ")-2 < 3 {
+	// Extract the description: everything after the ": " separator. The
+	// separator is guaranteed to exist because the header matched headerRe.
+	desc := header[strings.Index(header, ": ")+2:]
+	// Check that the description is at least 3 characters long. Count runes,
+	// not bytes, so multibyte text is measured as a reader counts it.
+	if utf8.RuneCountInString(desc) < 3 {
 		return tserr.InvalidFormat(&tserr.InvalidFormatArgs{
 			F:      "commit message header",
 			Value:  header,
 			Detail: "description must be at least 3 characters",
 		})
 	}
-	// Check that the header is not too long. Count bytes, not runes:
-	// git and commitlint measure header length in bytes, so we do too.
-	if len(header) > 72 {
+	// Check that the header is not too long. Count characters, not bytes,
+	// matching the git/commitlint convention of measuring display length.
+	if n := utf8.RuneCountInString(header); n > 72 {
 		return tserr.Lower(&tserr.LowerArgs{
-			Var: "header length", Actual: int64(len(header)), HigherBound: 72,
+			Var: "header length", Actual: int64(n), HigherBound: 72,
 		})
 	}
 	// Check that the body is separated from the header.
@@ -84,7 +89,7 @@ func validateMessage(msg string) error {
 func hasBreakingChange(msg string) bool {
 	// Ignore trailing newlines (git convention), matching validateMessage.
 	msg = strings.TrimRight(msg, "\n")
-	// Split the message into header and footer lines.
+	// Split the message into header and remainder.
 	header, _, _ := strings.Cut(msg, "\n")
 	// Check for the breaking-change marker: a "!" immediately before the
 	// ": " separator (e.g. "feat!: x" or "feat(api)!: x"). This ignores
