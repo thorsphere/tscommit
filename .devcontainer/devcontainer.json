@@ -15,7 +15,6 @@
         "golang.go"
       ],
       "settings": {
-        "locale": "en",
         "git.autofetch": true
       }
     }
