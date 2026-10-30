@@ -72,6 +72,9 @@ func TestValidateMessageInvalid(t *testing.T) {
 		{"trailing tab", "feat: add thing\t"},  // \s covers tabs too
 		// 73 bytes but only 68 runes — must be rejected because length is bytes.
 		{"byte-length limit", "feat: " + strings.Repeat("é", 67)}, // 6 + 134 = 140 bytes
+		{"missing blank line", "feat: add thing\nbody"},           // → "missing blank line between header and body"
+		{"two blank lines", "feat: add thing\n\n\nbody"},          // → "more than one blank line between header and body"
+		{"three blank lines", "feat: add thing\n\n\n\nbody"},      // → same second branch, extra blank line
 	}
 	// for each test case in the slice, call the function
 	for _, tc := range cases {
