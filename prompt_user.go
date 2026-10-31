@@ -4,14 +4,14 @@
 
 package tscommit
 
-// Import packages.
+// Import packages
 import (
-	"context" // context
-	"fmt"     // fmt
-	"strings" // strings
+	"context" // Import the context package for cancellation-aware prompting.
+	"fmt"     // Import the fmt package for printing the breaking-change warning.
+	"strings" // Import the strings package for trimming edited messages.
 
-	"github.com/thorsphere/lpcli" // lpcli
-	"github.com/thorsphere/tserr" // tserr
+	"github.com/thorsphere/lpcli" // Import the lpcli package for interactive prompting.
+	"github.com/thorsphere/tserr" // Import the tserr package for error handling.
 )
 
 // The choices the user can select when prompting for commit action.
@@ -21,6 +21,8 @@ const (
 	choiceRegenerate string = "regenerate" // The user can also regenerate the message.
 	choiceCancel     string = "cancel"     // The user can also cancel the commit.
 )
+
+const breakingWarning = "\n⚠ BREAKING CHANGE detected. This commit triggers a major version bump.\n" // The warning printed when a breaking change is detected.
 
 // commitChoices is the set of choices the user can select when prompting for
 // commit action.
@@ -47,19 +49,20 @@ func warnBreakingChange(p *lpcli.Prompter, msg string) {
 	// If the message contains a breaking change marker, print a prominent
 	// warning.
 	if hasBreakingChange(msg) {
-		fmt.Fprintln(p.Out(), "\n⚠ BREAKING CHANGE detected — this commit will trigger a major version bump.")
+		fmt.Fprint(p.Out(), breakingWarning)
 	}
 }
 
 // promptUser asks the user whether to accept, edit, regenerate, or cancel.
-// Returns the selected choice value, or an error if ctx is cancelled.
+// Returns the selected choice value, or an error if prompting fails.
+// Returns choiceCancel with the error if prompting fails.
 func promptUser(ctx context.Context, p *lpcli.Prompter, msg string) (string, error) {
 	// Warn the user if the message contains a breaking change marker.
 	warnBreakingChange(p, msg)
 	// Ask the user what to do. If the user cancels, return an error. Otherwise,
 	// return the selected choice value.
 	choice, err := p.Prompt(ctx, lpcli.SelectOptions{
-		Message: "Apply this commit? [Y/e/r/n] (Y=commit, e=edit, r=regenerate, n=cancel): ",
+		Message: "Apply this commit?",
 		Choices: commitChoices,
 	})
 	// If the user cancels, return an error.
@@ -70,11 +73,19 @@ func promptUser(ctx context.Context, p *lpcli.Prompter, msg string) (string, err
 	return choice, nil
 }
 
+// editMessage opens initialText in the user's editor and returns the edited
+// content. It is the editor seam, swapped via SetEditMessage in
+// export_test.go so unit tests never launch a real editor subprocess.
+var editMessage = func(ctx context.Context, p *lpcli.Prompter, initialText string) (string, error) {
+	// Open the editor and wait for the user to edit the message.
+	return p.Edit(ctx, initialText)
+}
+
 // editInEditor opens the message in the user's editor and returns the edited content.
 // Returns an error if the user cancels or the editor is empty.
 func editInEditor(ctx context.Context, p *lpcli.Prompter, initialText string) (string, error) {
 	// Open the editor and wait for the user to edit the message.
-	edited, err := p.Edit(ctx, initialText)
+	edited, err := editMessage(ctx, p, initialText)
 	// If the user cancels, return an error.
 	if err != nil {
 		return "", err
@@ -87,8 +98,10 @@ func editInEditor(ctx context.Context, p *lpcli.Prompter, initialText string) (s
 // checkEdited returns the edited message, or an error if the user left it
 // empty (only whitespace).
 func checkEdited(edited string) (string, error) {
+	// If the message is empty after trimming, return an error.
 	if strings.TrimSpace(edited) == "" {
 		return "", tserr.Empty("commit message after edit")
 	}
+	// Return the edited message and nil, to indicate success.
 	return edited, nil
 }
