@@ -34,7 +34,7 @@ Example output:
 feat(git): add staged-diff truncation
 
 Large diffs previously overflowed the prompt window. Truncate at 30k
-bytes on a line boundary so hunks stay parseable.
+characters so hunks stay parseable.
 
 Staged diff:
 `
