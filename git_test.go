@@ -88,7 +88,7 @@ func TestStagedDiff(t *testing.T) {
 		wantErrText    string
 		wantNoGitCalls bool // When set, git must not be invoked at all.
 	}{
-		{"passthrough", "diff --git a/x b/x\n", "", nil, 30000, "diff --git a/x b/x\n", false, "", false},
+		{"passthrough", "diff --git a/x b/x\n", "", nil, tscommit.MaxDiffChars, "diff --git a/x b/x\n", false, "", false},
 		{"exact fit", "12345", "", nil, 5, "12345", false, "", false},
 		{"truncated", long, "", nil, 40, long[:40] + "\n... (truncated)", false, "", false},
 		// Truncation counts characters: 3 runes fit exactly in 3.
@@ -99,10 +99,10 @@ func TestStagedDiff(t *testing.T) {
 		{"negative maxLen", "", "", nil, -1, "", true, "maxLen", true},
 		// A zero maxLen truncates to just the marker; the diff is non-empty.
 		{"zero maxLen", "x", "", nil, 0, "\n... (truncated)", false, "", false},
-		{"empty staged", "", "", nil, 30000, "", true, "", false},
-		{"command failure", "", "", errors.New("exit status 128"), 30000, "", true, "", false},
+		{"empty staged", "", "", nil, tscommit.MaxDiffChars, "", true, "", false},
+		{"command failure", "", "", errors.New("exit status 128"), tscommit.MaxDiffChars, "", true, "", false},
 		// git's diagnostic text must survive into the wrapped error.
-		{"failure with stderr", "", "fatal: not a git repository\n", errors.New("exit status 128"), 30000, "", true, "fatal: not a git repository", false},
+		{"failure with stderr", "", "fatal: not a git repository\n", errors.New("exit status 128"), tscommit.MaxDiffChars, "", true, "fatal: not a git repository", false},
 	}
 	// Run the tests.
 	for _, tc := range cases {
