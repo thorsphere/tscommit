@@ -71,31 +71,38 @@ func wantGitArgs(t *testing.T, got [][]string, want []string) {
 	}
 }
 
-// TestStagedDiff tests stagedDiff: pass-through, byte truncation, the
-// empty-staged error, and command failure.
+// TestStagedDiff tests stagedDiff: pass-through, character truncation,
+// maxLen validation, the empty-staged error, and command failure.
 func TestStagedDiff(t *testing.T) {
 	// Define a long string.
 	long := strings.Repeat("x", 100)
 	// Define the test cases.
 	cases := []struct {
-		name        string
-		out         string
-		errOut      string
-		err         error
-		maxLen      int
-		want        string
-		wantErr     bool
-		wantErrText string
+		name           string
+		out            string
+		errOut         string
+		err            error
+		maxLen         int
+		want           string
+		wantErr        bool
+		wantErrText    string
+		wantNoGitCalls bool // When set, git must not be invoked at all.
 	}{
-		{"passthrough", "diff --git a/x b/x\n", "", nil, 30000, "diff --git a/x b/x\n", false, ""},
-		{"exact fit", "12345", "", nil, 5, "12345", false, ""},
-		{"truncated", long, "", nil, 40, long[:40] + "\n... (truncated)", false, ""},
-		// Truncation counts bytes and may split a multi-byte rune.
-		{"truncated mid-rune", "ééé", "", nil, 3, "ééé"[:3] + "\n... (truncated)", false, ""},
-		{"empty staged", "", "", nil, 30000, "", true, ""},
-		{"command failure", "", "", errors.New("exit status 128"), 30000, "", true, ""},
+		{"passthrough", "diff --git a/x b/x\n", "", nil, 30000, "diff --git a/x b/x\n", false, "", false},
+		{"exact fit", "12345", "", nil, 5, "12345", false, "", false},
+		{"truncated", long, "", nil, 40, long[:40] + "\n... (truncated)", false, "", false},
+		// Truncation counts characters: 3 runes fit exactly in 3.
+		{"exact fit multibyte", "ééé", "", nil, 3, "ééé", false, "", false},
+		// Truncation cuts at the character boundary, never mid-rune.
+		{"truncated multibyte", "ééé", "", nil, 2, "éé" + "\n... (truncated)", false, "", false},
+		// A negative maxLen is rejected before git runs.
+		{"negative maxLen", "", "", nil, -1, "", true, "maxLen", true},
+		// A zero maxLen truncates to just the marker; the diff is non-empty.
+		{"zero maxLen", "x", "", nil, 0, "\n... (truncated)", false, "", false},
+		{"empty staged", "", "", nil, 30000, "", true, "", false},
+		{"command failure", "", "", errors.New("exit status 128"), 30000, "", true, "", false},
 		// git's diagnostic text must survive into the wrapped error.
-		{"failure with stderr", "", "fatal: not a git repository\n", errors.New("exit status 128"), 30000, "", true, "fatal: not a git repository"},
+		{"failure with stderr", "", "fatal: not a git repository\n", errors.New("exit status 128"), 30000, "", true, "fatal: not a git repository", false},
 	}
 	// Run the tests.
 	for _, tc := range cases {
@@ -115,11 +122,19 @@ func TestStagedDiff(t *testing.T) {
 			if got != tc.want {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "StagedDiff", Actual: got, Want: tc.want}))
 			}
-			// if the git invocation is wrong, the test fails
-			wantArgs := []string{"diff", "--staged", "-W"}
-			wantGitArgs(t, fake.args, wantArgs)
+			// if the invocation expectation is wrong, the test fails
+			if tc.wantNoGitCalls {
+				// The guard must reject maxLen without invoking git.
+				if len(fake.args) != 0 {
+					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "git args", Actual: fmt.Sprintf("%v", fake.args), Want: "no calls"}))
+				}
+			} else {
+				// if the git invocation is wrong, the test fails
+				wantArgs := []string{"diff", "--staged", "-W"}
+				wantGitArgs(t, fake.args, wantArgs)
+			}
 			// if the diagnostic text is missing from the error, the test fails
-			if tc.wantErrText != "" && !strings.Contains(err.Error(), tc.wantErrText) {
+			if tc.wantErrText != "" && err != nil && !strings.Contains(err.Error(), tc.wantErrText) {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "StagedDiff error text", Actual: err.Error(), Want: tc.wantErrText}))
 			}
 		})
