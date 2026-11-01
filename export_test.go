@@ -25,6 +25,8 @@ var (
 	BreakingWarning    = breakingWarning    // The warning printed when a breaking change is detected.
 	NewPrompter        = newPrompter        // Creates the CLI prompter.
 	PromptUser         = promptUser         // Asks the user what to do with the message.
+	BuildPrompt        = buildPrompt        // Assembles the AI prompt from the staged diff.
+	PromptTemplate     = promptTemplate     // The instruction text prepended to the staged diff.
 )
 
 // The choice values promptUser returns, bridged for the external test package.
