@@ -22,14 +22,20 @@ import (
 // the git binary installed (swapped via SetExecGit in export_test.go).
 type gitExec func(ctx context.Context, stdout, stderr io.Writer, args ...string) error
 
-// execGit executes a real git command via os/exec.
+// maxDiffChars is the maximum staged diff length in characters (runes)
+// sent to the AI provider.
+const maxDiffChars = 30000 // The staged diff size limit.
+
+// execGit executes a real git command via os/exec. It is the one piece of
+// git.go that unit tests never run: tests must not depend on the git
+// binary, so they swap this seam via SetExecGit.
 var execGit gitExec = func(ctx context.Context, stdout, stderr io.Writer, args ...string) error {
 	// Create the git command bound to the context.
 	cmd := exec.CommandContext(ctx, "git", args...)
 	// Redirect the command's output to the given writers.
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	// Run the command.
+	// Run the command and return any error.
 	return cmd.Run()
 }
 
@@ -58,9 +64,16 @@ func gitErr(err error, stderr string) error {
 	return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr))
 }
 
-// StagedDiff returns the staged diff, truncated to maxLen bytes.
-// Returns an error if nothing is staged.
+// stagedDiff returns the staged diff, truncated to the first maxLen
+// characters when it is longer, with a truncation marker appended.
+// Truncation counts characters (runes), matching the display-length
+// convention used by validateMessage. Returns an error if nothing is
+// staged or if maxLen is negative.
 func stagedDiff(ctx context.Context, maxLen int) (string, error) {
+	// If maxLen is negative, return an error.
+	if maxLen < 0 {
+		return "", tserr.Higher(&tserr.HigherArgs{Var: "maxLen", Actual: int64(maxLen), LowerBound: 0})
+	}
 	// Capture the diff from git using the flags --staged and -W. stderr is
 	// discarded: runGit attaches any diagnostic text to the returned error.
 	var outDiff bytes.Buffer
@@ -71,18 +84,22 @@ func stagedDiff(ctx context.Context, maxLen int) (string, error) {
 	if outDiff.Len() == 0 {
 		return "", tserr.Empty("git staged changes")
 	}
-	// Truncate the diff to maxLen bytes.
+	// Truncate the diff to maxLen characters, counting runes rather than
+	// bytes so multi-byte text is measured as a reader counts it and the
+	// cut never splits a character.
 	diff := outDiff.String()
-	if len(diff) > maxLen {
-		diff = diff[:maxLen] + "\n... (truncated)"
+	// If the diff exceeds maxLen characters, cut at the character boundary
+	// and append the truncation marker.
+	if r := []rune(diff); len(r) > maxLen {
+		diff = string(r[:maxLen]) + "\n... (truncated)"
 	}
 	// Return the diff and no error to indicate success.
 	return diff, nil
 }
 
-// Commit creates a git commit with the given message.
+// commit creates a git commit with the message msg.
 func commit(ctx context.Context, msg string) error {
-	// Create a new git commit with the given message, streaming output to
+	// Create a new git commit with the given message msg, streaming output to
 	// os.Stdout and os.Stderr.
 	if err := runGit(ctx, os.Stdout, os.Stderr, "commit", "-m", msg); err != nil {
 		// If an error occurs, return an error.
