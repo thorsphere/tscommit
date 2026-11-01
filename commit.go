@@ -29,7 +29,7 @@ func RunContext(ctx context.Context) error {
 	// Create the interactive prompter for the run.
 	p := newPrompter()
 	// Read the staged git diff.
-	diff, err := stagedDiff(ctx, 30000)
+	diff, err := stagedDiff(ctx, maxDiffChars)
 	// Return the error if reading the staged diff fails.
 	if err != nil {
 		return err
