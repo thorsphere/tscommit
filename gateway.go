@@ -41,7 +41,7 @@ func genMessage(ctx context.Context, client *tsaiclient.Client, diff string, ses
 		req, err := tsaiclient.NewRequest(prompt)
 		// Return the error if building the request fails.
 		if err != nil {
-			return "", tserr.Op(&tserr.OpArgs{Op: "new request", Fn: "AI Client", Err: err})
+			return "", tserr.Op(&tserr.OpArgs{Op: "new request", Fn: "AI client", Err: err})
 		}
 		// Attach the sticky routing key shared by every attempt and regeneration.
 		req = req.WithSessionID(sessionID)
@@ -49,7 +49,7 @@ func genMessage(ctx context.Context, client *tsaiclient.Client, diff string, ses
 		res, err := completeChat(ctx, client, req)
 		// Return the error if the provider call fails.
 		if err != nil {
-			return "", err
+			return "", tserr.Op(&tserr.OpArgs{Op: "complete chat", Fn: "AI client", Err: err})
 		}
 		// Clean wrapper formatting the model may have added around the message.
 		content := cleanMessage(res.Content)
@@ -82,7 +82,7 @@ func genMessage(ctx context.Context, client *tsaiclient.Client, diff string, ses
 		// If attempts remain, ask the provider to fix its previous output.
 		if attempt < maxGenAttempts {
 			// Build corrective feedback for the retry prompt, including the
-			// previous output and the generated message.
+			// previous output.
 			prompt = prompt +
 				feedback +
 				"\nPrevious output:\n" + content +
@@ -93,13 +93,15 @@ func genMessage(ctx context.Context, client *tsaiclient.Client, diff string, ses
 	return "", tserr.Op(&tserr.OpArgs{Op: "generate message", Fn: "AI client", Err: lastErr})
 }
 
-// cleanMessage removes markdown code fences, backticks, and extra wrapper formatting.
+// cleanMessage removes markdown code fences, backticks, and
+// extra wrapper formatting from s and returns the cleaned message.
 func cleanMessage(s string) string {
 	// Trim leading and trailing whitespace
 	s = strings.TrimSpace(s)
 	// Strip outer markdown code block fences (e.g. ```commit ... ``` or ``` ...)
 	if strings.HasPrefix(s, "```") {
-		// Remove opening fence and optional language tag up to newline
+		// If there is a newline after the opening fence, remove everything up to and including it.
+		// Otherwise, just remove the opening fence. In either case, remove the trailing fence.
 		if idx := strings.Index(s, "\n"); idx != -1 {
 			// Remove opening fence and optional language tag up to newline
 			s = s[idx+1:]
@@ -110,9 +112,20 @@ func cleanMessage(s string) string {
 		// Remove trailing fence
 		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
 	}
-	// Strip outer single or double quotes / backticks if wrapped
-	s = strings.Trim(strings.TrimSpace(s), "`\"'")
-	// Return trimmed string
+	// Strip one matching pair of outer quotes or backticks when the message
+	// is wrapped (e.g. "..." , '...' or `...`).
+	s = strings.TrimSpace(s)
+	// Check that at least two characters remain to form a wrapper pair.
+	if n := len(s); n >= 2 {
+		// Read the first and last bytes; wrapper characters are ASCII.
+		first, last := s[0], s[n-1]
+		// Check that both ends carry the same wrapper character.
+		if first == last && strings.ContainsRune("`\"'", rune(first)) {
+			// Remove the matched wrapper pair from both ends.
+			s = s[1 : n-1]
+		}
+	}
+	// Return the message trimmed of whitespace next to the wrapper.
 	return strings.TrimSpace(s)
 }
 
