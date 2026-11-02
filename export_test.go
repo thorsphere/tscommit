@@ -28,6 +28,9 @@ var (
 	BuildPrompt        = buildPrompt        // Assembles the AI prompt from the staged diff.
 	PromptTemplate     = promptTemplate     // The instruction text prepended to the staged diff.
 	MaxDiffChars       = maxDiffChars       // The maximum staged diff length in characters (runes) sent to the AI provider.
+	CleanMessage       = cleanMessage       // Strips wrapper formatting from AI output.
+	NewSessionID       = newSessionID       // Generates the sticky routing key for a session.
+	GenMessage         = genMessage         // Generates a commit message via the AI client.
 )
 
 // The choice values promptUser returns, bridged for the external test package.
