@@ -4,40 +4,48 @@
 
 package tscommit
 
+// Import packages
 import (
-	"time"
+	"time" // Import the time package for timeout settings.
 
-	"github.com/thorsphere/tsaiclient"
+	"github.com/thorsphere/tsaiclient" // Import the tsaiclient package for AI client interactions.
+	"github.com/thorsphere/tserr"      // Import the tserr package for error handling.
 )
 
-// Defaults for provider request settings.
+// Defaults for provider and request settings.
 const (
 	defaultModel               = "tencent/hy4-preview" // The default model identifier.
 	defaultMaxCompletionTokens = 1000                  // The default cap on generated tokens.
 	defaultTemperature         = 0.3                   // The default sampling temperature.
 	defaultReasoningEffort     = "medium"              // The default reasoning effort level.
+	defaultTimeout             = 60 * time.Second      // The default request timeout.
 )
 
 // newClient returns the AI client used for commit message generation. It
-// returns an error if the provider configuration is invalid, including a
-// missing OPENROUTER_API_KEY in the environment.
+// returns an error if the provider configuration is invalid.
 func newClient() (*tsaiclient.Client, error) {
 	// Build the model configuration with the package defaults.
 	cfg, err := tsaiclient.NewConfig(defaultModel)
 	// Return the error if the model configuration is invalid.
 	if err != nil {
-		return nil, err
+		return nil, tserr.Op(&tserr.OpArgs{Op: "new config", Fn: "AI client", Err: err})
 	}
 	// Apply the generation defaults used for commit messages.
 	cfg = cfg.WithMaxCompletionTokens(defaultMaxCompletionTokens).
 		WithTemperature(defaultTemperature).
 		WithReasoningEffort(defaultReasoningEffort).
-		WithTimeout(60 * time.Second)
+		WithTimeout(defaultTimeout)
 	// Build the OpenRouter provider with app attribution headers.
 	p := tsaiclient.NewOpenRouter().
 		WithReferer("https://github.com/thorsphere/tscommit").
 		WithTitle("tscommit").
 		WithCategories([]string{"cli-agent", "cloud-agent"})
 	// Return the client; construction validates cfg and p, including the key.
-	return tsaiclient.NewClient(cfg, p)
+	c, err := tsaiclient.NewClient(cfg, p)
+	// Return the error if the client construction fails.
+	if err != nil {
+		return nil, tserr.Op(&tserr.OpArgs{Op: "new client", Fn: "AI client", Err: err})
+	}
+	// Return the constructed client and nil error to indicate success.
+	return c, nil
 }
