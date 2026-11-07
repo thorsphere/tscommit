@@ -135,7 +135,7 @@ func TestPromptUserWarns(t *testing.T) {
 	}
 }
 
-// TestPromptUserErrors tests that promptUser returns choiceCancel with an
+// TestPromptUserErrors tests promptUser with an
 // error when prompting fails, so callers abort instead of committing.
 func TestPromptUserErrors(t *testing.T) {
 	// Create a context that is already cancelled.
@@ -176,9 +176,9 @@ func TestPromptUserErrors(t *testing.T) {
 			if err == nil {
 				t.Error(tserr.NilFailed("promptUser"))
 			}
-			// The failure must report the cancel choice, never accept.
-			if got != tscommit.ChoiceCancel {
-				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "promptUser", Actual: got, Want: tscommit.ChoiceCancel}))
+			// The failure must report an empty choice.
+			if got != "" {
+				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "promptUser", Actual: got, Want: ""}))
 			}
 		})
 	}

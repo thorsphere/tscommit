@@ -54,20 +54,19 @@ func warnBreakingChange(p *lpcli.Prompter, msg string) {
 }
 
 // promptUser asks the user whether to accept, edit, regenerate, or cancel.
-// Returns the selected choice value, or an error if prompting fails.
-// Returns choiceCancel with the error if prompting fails.
+// Returns the selected choice value, or an empty string if prompting fails.
 func promptUser(ctx context.Context, p *lpcli.Prompter, msg string) (string, error) {
 	// Warn the user if the message contains a breaking change marker.
 	warnBreakingChange(p, msg)
-	// Ask the user what to do. If the user cancels, return an error. Otherwise,
-	// return the selected choice value.
+	// Ask the user what to do.
 	choice, err := p.Prompt(ctx, lpcli.SelectOptions{
 		Message: "Apply this commit?",
 		Choices: commitChoices,
 	})
-	// If the user cancels, return an error.
+	// If prompting fails (including a user interrupt), return an empty
+	// choice and the error; the caller normalizes user aborts.
 	if err != nil {
-		return choiceCancel, err
+		return "", err
 	}
 	// Return the selected choice value and nil, to indicate success.
 	return choice, nil
