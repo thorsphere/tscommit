@@ -1,15 +1,18 @@
 // Copyright (c) 2026 thorsphere.
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
+
 package tscommit
 
+// Import packages
 import (
-	"context"
+	"context" // Import the context package for context handling.
+	"fmt"     // Import the fmt package for printing messages.
 
-	"github.com/thorsphere/tserr"
+	"github.com/thorsphere/tserr" // Import the tserr package for error reporting.
 )
 
-// Run executes the tscommit workflow using context.Background().
+// Run executes the tscommit workflow with a background context.
 func Run() error {
 	// Delegate to RunContext with a background context.
 	return RunContext(context.Background())
@@ -50,7 +53,7 @@ func RunContext(ctx context.Context) error {
 		choice, err := promptUser(ctx, p, msg)
 		// Return the error if prompting fails.
 		if err != nil {
-			return err
+			return abortOr(ctx, err)
 		}
 		// Handle the user's choice.
 		switch choice {
@@ -62,7 +65,7 @@ func RunContext(ctx context.Context) error {
 			edited, err := editInEditor(ctx, p, msg)
 			// Return the error if editing fails.
 			if err != nil {
-				return err
+				return abortOr(ctx, err)
 			}
 			// Adopt the user's edit as the new message; it is authoritative.
 			msg = edited
@@ -71,11 +74,31 @@ func RunContext(ctx context.Context) error {
 			msg, err = genMessage(ctx, client, diff, sessionID)
 			// Return the error if message generation fails.
 			if err != nil {
-				return err
+				return abortOr(ctx, err)
 			}
 		case choiceCancel:
 			// Return an aborted error when the user cancels.
 			return tserr.Aborted("commit")
+		default:
+			// Ignore an unhandled choice so the pending message survives;
+			// warn the user and ask again.
+			fmt.Fprintf(p.Out(), "Ignoring unhandled option %q; please choose again.\n", choice)
+			// Re-prompt with the unchanged message.
+			continue
 		}
 	}
+}
+
+// abortOr maps err to tserr.Aborted("commit") when ctx is done and the run
+// was therefore aborted by the user (Ctrl-C, SIGTERM); otherwise it returns
+// err unchanged so genuine failures surface as themselves. err must be
+// non-nil.
+func abortOr(ctx context.Context, err error) error {
+	// If the context is done, the user aborted the run.
+	if ctx.Err() != nil {
+		// Return an aborted error to give every cancel path the same shape.
+		return tserr.Aborted("commit")
+	}
+	// Return the original error to indicate a genuine failure.
+	return err
 }
