@@ -14,11 +14,11 @@ import (
 
 // Defaults for provider and request settings.
 const (
-	defaultModel               = "tencent/hy4-preview" // The default model identifier.
-	defaultMaxCompletionTokens = 1000                  // The default cap on generated tokens.
-	defaultTemperature         = 0.3                   // The default sampling temperature.
-	defaultReasoningEffort     = "medium"              // The default reasoning effort level.
-	defaultTimeout             = 60 * time.Second      // The default request timeout.
+	defaultModel               = "tencent/hy4"   // The default model identifier.
+	defaultMaxCompletionTokens = 16000           // The default cap on generated tokens.
+	defaultTemperature         = 0.3             // The default sampling temperature.
+	defaultReasoningEffort     = "medium"        // The default reasoning effort level.
+	defaultTimeout             = 3 * time.Minute // The default request timeout.
 )
 
 // newClient returns the AI client used for commit message generation. It
