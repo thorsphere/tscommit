@@ -205,13 +205,13 @@ func TestRunContext(t *testing.T) {
 	// The canned staged diff served to the workflow.
 	const diff = "diff --git a/login.go b/login.go\n"
 	// The message the fake provider produces on its first turn.
-	const firstMsg = "feat: add login"
+	const firstMsg = "feat(login): add login"
 	// The message the fake editor produces after the user edits.
 	const editedMsg = "feat: add login form"
 	// The message the fake provider produces on regeneration.
-	const secondMsg = "feat: add the login form"
+	const secondMsg = "feat(login): add the login form"
 	// The message carrying a breaking-change marker.
-	const breakingMsg = "feat!: drop the v1 api"
+	const breakingMsg = "feat(login)!: drop the v1 api"
 	// The sentinel failure of the provider.
 	genErr := errors.New("provider boom")
 	// Test cases.
@@ -503,7 +503,7 @@ func TestRun(t *testing.T) {
 	// The canned staged diff served to the workflow.
 	const diff = "diff --git a/login.go b/login.go\n"
 	// The message the fake provider produces.
-	const msg = "feat: add login"
+	const msg = "feat(x): add login"
 	// Test cases.
 	cases := []struct {
 		name        string     // The scenario name.

@@ -14,27 +14,26 @@ import (
 	"github.com/thorsphere/tserr"    // Import the tserr package for error handling.
 )
 
-// header72 is exactly 72 characters: "feat: " + 66 "a"s.
-var header72 = "feat: " + strings.Repeat("a", 66)
+// header72 is exactly 72 characters: "feat(x): " + 63 "a"s.
+var header72 = "feat(x): " + strings.Repeat("a", 63)
 
 // TestValidateMessageValid tests the ValidateMessage function with valid messages
 // It checks that the function returns nil for each message in the slice
 func TestValidateMessageValid(t *testing.T) {
 	msgs := []string{
-		"feat: xyz",     // minimum-3-char boundary description
-		"feat: xyz\n",   // git-style trailing newline
-		"feat: xyz\n\n", // stray extra trailing newline
-		"fix: correct off-by-one in diff truncate",  // plain header
-		"feat(git): add staged-diff truncation",     // scoped header
-		"feat(api)!: remove legacy config keys",     // scoped breaking marker
-		"chore!: drop Go 1.20 support",              // unscoped breaking marker
-		"refactor(a-b/c.d): tidy scope charset",     // full scope charset
-		header72,                                    // header at the length limit
-		"feat: " + strings.Repeat("é", 66),          // 72 characters — length counts characters
-		"feat: add thing\n\nExplain WHAT and WHY.",  // body after one blank line
-		"feat: add thing\n\nBody line.\n\nRefs #42", // body plus footer
-		"feat: add thing\n\nBody.\n\nBREAKING CHANGE: config keys renamed",
-		"feat: ééé", // 3 runes — min rule counts characters, not bytes
+		"feat(x): xyz",     // minimum-3-char boundary description
+		"feat(x): xyz\n",   // git-style trailing newline
+		"feat(x): xyz\n\n", // stray extra trailing newline
+		"fix(x): correct off-by-one in diff truncate",  // plain header
+		"feat(git): add staged-diff truncation",        // scoped header
+		"feat(api)!: remove legacy config keys",        // scoped breaking marker
+		"refactor(a-b/c.d): tidy scope charset",        // full scope charset
+		header72,                                       // header at the length limit
+		"feat(x): " + strings.Repeat("é", 63),          // 72 characters — length counts characters
+		"feat(x): add thing\n\nExplain WHAT and WHY.",  // body after one blank line
+		"feat(x): add thing\n\nBody line.\n\nRefs #42", // body plus footer
+		"feat(x): add thing\n\nBody.\n\nBREAKING CHANGE: config keys renamed",
+		"feat(x): ééé", // 3 runes — min rule counts characters, not bytes
 	}
 	// for each message in the slice, call the function
 	for _, msg := range msgs {
@@ -53,28 +52,30 @@ func TestValidateMessageInvalid(t *testing.T) {
 		msg  string
 	}{
 		{"empty", ""},
-		{"missing space after colon", "feat:x"},
-		{"no description", "feat: "},
-		{"unknown type", "wip: x"},
-		{"uppercase type", "FEAT: x"},
-		{"trailing period", "feat: xyz."},
-		{"trailing space", "feat: add thing "},
-		{"trailing space short", "feat: x "},
+		{"missing space after colon", "feat(x):x"},
+		{"no description", "feat(x): "},
+		{"unknown type", "wip(x): x"},
+		{"uppercase type", "FEAT(x): x"},
+		{"trailing period", "feat(x): xyz."},
+		{"trailing space", "feat(x): add thing "},
+		{"trailing space short", "feat(x): x "},
 		{"uppercase scope", "feat(Upper): x"},
 		{"scope with space", "feat(with space): x"},
-		{"no blank line", "feat: x\nbody"},
-		{"three blank lines", "feat: x\n\n\n\nbody"},
-		{"single-char description", "feat: x"},                  // min-3-char rule
-		{"two-char description", "feat: ab"},                    // min-3-char rule
-		{"trailing space", "feat: add thing "},                  // [^.\s]$ rule
-		{"trailing tab", "feat: add thing\t"},                   // \s covers tabs too
-		{"missing blank line", "feat: add thing\nbody"},         // missing blank line between header and body
-		{"two blank lines", "feat: add thing\n\n\nbody"},        // more than one blank line between header and body
-		{"three blank lines", "feat: add thing\n\n\n\nbody"},    // same second branch, extra blank line
-		{"two-rune multibyte description", "feat: éé"},          // 2 runes — min-3 rule
-		{"header too long", "feat: " + strings.Repeat("a", 67)}, // 73 characters
-		// 73 characters (140 bytes) — rejected because length counts characters.
-		{"character-length limit", "feat: " + strings.Repeat("é", 67)}, // 6 + 67 = 73 characters
+		{"no blank line", "feat(x): x\nbody"},
+		{"three blank lines", "feat(x): xyz\n\n\n\nbody"},          // more than one blank line between header and body
+		{"single-char description", "feat(x): x"},                  // min-3-char rule
+		{"two-char description", "feat(x): ab"},                    // min-3-char rule
+		{"trailing space", "feat(x): add thing "},                  // [^.\s]$ rule
+		{"trailing tab", "feat(x): add thing\t"},                   // \s covers tabs too
+		{"missing blank line", "feat(x): add thing\nbody"},         // missing blank line between header and body
+		{"two blank lines", "feat(x): add thing\n\n\nbody"},        // more than one blank line between header and body
+		{"three blank lines", "feat(x): add thing\n\n\n\nbody"},    // same second branch, extra blank line
+		{"two-rune multibyte description", "feat(x): éé"},          // 2 runes — min-3 rule
+		{"header too long", "feat(x): " + strings.Repeat("a", 64)}, // 73 characters
+		// 73 characters (137 bytes) — rejected because length counts characters.
+		{"character-length limit", "feat(x): " + strings.Repeat("é", 64)}, // 73 characters
+		{"missing scope", "feat: xyz"},                                    // missing required scope
+		{"empty scope", "feat(): xyz"},                                    // the charset class requires ≥1 char
 	}
 	// for each test case in the slice, call the function
 	for _, tc := range cases {
@@ -94,14 +95,14 @@ func TestHasBreakingChange(t *testing.T) {
 		want bool
 	}{
 		{"scoped header marker", "feat(api)!: remove legacy config keys", true},
-		{"plain header marker", "chore!: drop Go 1.20 support", true},
-		{"footer", "feat: x\n\nBREAKING CHANGE: config keys renamed", true},
-		{"no marker", "fix: handle empty diff", false},
-		{"exclamation in description", "feat: support wow!", false},
-		{"footer text mid-prose", "feat: x\n\nWe avoided BREAKING CHANGE: here", false},
-		{"hyphen footer", "feat: x\n\nBREAKING-CHANGE: renamed", true},
-		{"empty footer", "feat: x\n\nBREAKING CHANGE:", true},
-		{"marker in description", "feat: document the !: marker", false},
+		{"plain header marker", "chore(x)!: drop Go 1.20 support", true},
+		{"footer", "feat(x): x\n\nBREAKING CHANGE: config keys renamed", true},
+		{"no marker", "fix(x): handle empty diff", false},
+		{"exclamation in description", "feat(x): support wow!", false},
+		{"footer text mid-prose", "feat(x): x\n\nWe avoided BREAKING CHANGE: here", false},
+		{"hyphen footer", "feat(x): x\n\nBREAKING-CHANGE: renamed", true},
+		{"empty footer", "feat(x): x\n\nBREAKING CHANGE:", true},
+		{"marker in description", "feat(x): document the !: marker", false},
 	}
 	// for each test case in the slice, call the function
 	for _, tc := range cases {

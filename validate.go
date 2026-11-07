@@ -13,10 +13,10 @@ import (
 	"github.com/thorsphere/tserr" // Import the tserr package for error handling.
 )
 
-// headerRe matches a Conventional Commits header line with optional scope
-// and optional breaking-change marker.
+// headerRe matches a Conventional Commits header line with a mandatory
+// scope and an optional breaking-change marker.
 var headerRe = regexp.MustCompile(
-	`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\([a-z0-9._/-]+\))?!?: \S(.*[^.\s])?$`)
+	`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\([a-z0-9._/-]+\))!?: \S(.*[^.\s])?$`)
 
 // breakingFooterRe matches a "BREAKING CHANGE:" or "BREAKING-CHANGE:" footer
 // line (anchored to the start of a line).
@@ -37,7 +37,7 @@ func validateMessage(msg string) error {
 		return tserr.InvalidFormat(&tserr.InvalidFormatArgs{
 			F:      "commit message header",
 			Value:  header,
-			Detail: "must match <type>[scope]!: <imperative description> with no trailing period",
+			Detail: "must match <type>(<scope>)[!]: <imperative description> with no trailing period",
 		})
 	}
 	// Extract the description: everything after the ": " separator. The

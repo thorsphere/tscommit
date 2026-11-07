@@ -57,6 +57,7 @@ func TestPromptTemplateContract(t *testing.T) {
 		{"breaking marker", `"!" after type/scope`},
 		{"breaking footer spelling", "BREAKING CHANGE: "},
 		{"description minimum", "short description"},
+		{"scope rule", "<type>(<scope>)[!]: <short description>"},
 	}
 	// Run the test cases.
 	for _, tc := range cases {

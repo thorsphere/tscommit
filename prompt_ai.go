@@ -9,9 +9,9 @@ package tscommit
 const promptTemplate = `You are an expert Git commit assistant. Generate a high-quality commit message based on the staged diff below.
 
 STRICT FORMAT RULES:
-1. Header Line: <type>[optional scope][!]: <short description>
+1. Header Line: <type>(<scope>)[!]: <short description>
    - Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore.
-   - Scope: optional, lowercase, derived from the primary package/directory changed (e.g. "git", "gateway").
+   - Scope: required, lowercase, derived from the primary package/directory changed (e.g. "git", "gateway").
    - Use imperative, present tense ("rename" not "renamed").
    - Max 72 characters; no trailing period.
    - Summarize the single dominant intent, not a file-by-file list.
