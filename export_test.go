@@ -32,6 +32,7 @@ var (
 	NewSessionID       = newSessionID       // Generates the sticky routing key for a session.
 	GenMessage         = genMessage         // Generates a commit message via the AI client.
 	NewClient          = newClient          // Creates the AI client for commit message generation.
+	AbortOr            = abortOr            // Maps user-initiated aborts to a tserr.Aborted error.
 )
 
 // The choice values promptUser returns, bridged for the external test package.
