@@ -2,6 +2,11 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
+// Package tscommit generates conventional git commit messages from the
+// staged diff via a configured AI provider and creates the commit after
+// interactive user review. It is a component-agnostic library: the AI
+// provider API key is read from the environment, and no state is persisted
+// locally.
 package tscommit
 
 // Import packages
