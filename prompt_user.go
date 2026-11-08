@@ -58,6 +58,10 @@ func warnBreakingChange(p *lpcli.Prompter, msg string) {
 func promptUser(ctx context.Context, p *lpcli.Prompter, msg string) (string, error) {
 	// Warn the user if the message contains a breaking change marker.
 	warnBreakingChange(p, msg)
+	// Show the candidate commit message so the user can review it.
+	fmt.Fprintln(p.Out(), msg)
+	// Separate the message from the prompt for readability.
+	fmt.Fprintln(p.Out())
 	// Ask the user what to do.
 	choice, err := p.Prompt(ctx, lpcli.SelectOptions{
 		Message: "Apply this commit?",
