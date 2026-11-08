@@ -22,7 +22,7 @@ const (
 	choiceCancel     string = "cancel"     // The user can also cancel the commit.
 )
 
-const breakingWarning = "\n⚠ BREAKING CHANGE detected. This commit triggers a major version bump.\n" // The warning printed when a breaking change is detected.
+const breakingWarning = "⚠ BREAKING CHANGE detected. This commit triggers a major version bump.\n\n" // The warning printed when a breaking change is detected.
 
 // commitChoices is the set of choices the user can select when prompting for
 // commit action.
@@ -53,15 +53,17 @@ func warnBreakingChange(p *lpcli.Prompter, msg string) {
 	}
 }
 
-// promptUser asks the user whether to accept, edit, regenerate, or cancel.
-// Returns the selected choice value, or an empty string if prompting fails.
+// promptUser shows the candidate commit message, warns when it carries a
+// breaking-change marker, and asks the user whether to accept, edit,
+// regenerate, or cancel. Returns the selected choice value, or an empty
+// string if prompting fails.
 func promptUser(ctx context.Context, p *lpcli.Prompter, msg string) (string, error) {
-	// Warn the user if the message contains a breaking change marker.
-	warnBreakingChange(p, msg)
 	// Show the candidate commit message so the user can review it.
 	fmt.Fprintln(p.Out(), msg)
-	// Separate the message from the prompt for readability.
+	// Separate the message from the warning and prompt for readability.
 	fmt.Fprintln(p.Out())
+	// Warn the user if the message contains a breaking-change marker.
+	warnBreakingChange(p, msg)
 	// Ask the user what to do.
 	choice, err := p.Prompt(ctx, lpcli.SelectOptions{
 		Message: "Apply this commit?",

@@ -85,58 +85,89 @@ func TestPromptUserSelects(t *testing.T) {
 	}
 }
 
-// TestPromptUserWarns tests that promptUser prints the breaking-change
-// warning before the prompt when msg carries a breaking-change marker, and
-// stays silent otherwise.
+// TestPromptUserWarns tests that promptUser shows the candidate message,
+// prints the breaking-change warning after the message and before the
+// prompt when msg carries a breaking-change marker, and stays silent
+// otherwise.
 func TestPromptUserWarns(t *testing.T) {
-	// Test cases.
-	cases := []struct {
-		name string
-		msg  string
-		want string // The expected output prefix; empty when no warning.
-	}{
-		{"bang marker warns", "feat!: drop the v1 api", tscommit.BreakingWarning},
-		{"footer warns", "feat: rework storage\n\nBREAKING CHANGE: the layout changed", tscommit.BreakingWarning},
-		{"plain message silent", "feat: add the thing", ""},
-	}
-	// Run the test cases.
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create the prompter with canned input and captured output.
-			p := tscommit.NewPrompter()
-			// Capture the prompter output.
-			var buf bytes.Buffer
-			// Route the prompter output into the buffer. If that fails, fail
-			// the test.
-			if err := p.SetOut(&buf); err != nil {
-				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "SetOut", Err: err}))
-				return
-			}
-			// Route the canned input into the prompter. If that fails, fail
-			// the test.
-			if err := p.SetIn(strings.NewReader("y\n")); err != nil {
-				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "SetIn", Err: err}))
-				return
-			}
-			// Call the function under test.
-			_, err := tscommit.PromptUser(context.Background(), p, tc.msg)
-			// If prompting failed, fail the test.
-			if err != nil {
-				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
-				return
-			}
-			// Check the warning against the captured output.
-			got := buf.String()
-			// If a warning is expected, it must lead the output.
-			if tc.want != "" && !strings.HasPrefix(got, tc.want) {
-				t.Errorf("output %q does not start with the breaking-change warning", got)
-			}
-			// If no warning is expected, the output must not contain one.
-			if tc.want == "" && strings.Contains(got, "BREAKING CHANGE detected") {
-				t.Errorf("output %q contains an unexpected breaking-change warning", got)
-			}
-		})
-	}
+    // Test cases.
+    cases := []struct {
+        name string
+        msg  string
+        want string // The expected warning text; empty when no warning is expected.
+    }{
+        {"bang marker warns", "feat!: drop the v1 api", tscommit.BreakingWarning},
+        {"footer warns", "feat: rework storage\n\nBREAKING CHANGE: the layout changed", tscommit.BreakingWarning},
+        {"plain message silent", "feat: add the thing", ""},
+    }
+    // Run the test cases.
+    for _, tc := range cases {
+        t.Run(tc.name, func(t *testing.T) {
+            // Create the prompter with canned input and captured output.
+            p := tscommit.NewPrompter()
+            // Capture the prompter output.
+            var buf bytes.Buffer
+            // Route the prompter output into the buffer. If that fails, fail
+            // the test.
+            if err := p.SetOut(&buf); err != nil {
+                t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "SetOut", Err: err}))
+                return
+            }
+            // Route the canned input into the prompter. If that fails, fail
+            // the test.
+            if err := p.SetIn(strings.NewReader("y\n")); err != nil {
+                t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "SetIn", Err: err}))
+                return
+            }
+            // Call the function under test.
+            _, err := tscommit.PromptUser(context.Background(), p, tc.msg)
+            // If prompting failed, fail the test.
+            if err != nil {
+                t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
+                return
+            }
+            // Check the message and warning against the captured output.
+            got := buf.String()
+            // The candidate message must always be shown.
+            if !strings.Contains(got, tc.msg) {
+                t.Error(tserr.NotFound(fmt.Sprintf("candidate message %q in promptUser output %q", tc.msg, got)))
+            }
+            // If a warning is expected, it must appear after the message and
+            // before the prompt.
+            if tc.want != "" {
+                // Locate the warning and the message in the output.
+                wi, mi := strings.Index(got, tc.want), strings.Index(got, tc.msg)
+                // The warning must be present.
+                if wi < 0 {
+                    t.Error(tserr.NotFound(fmt.Sprintf("breaking-change warning in promptUser output %q", got)))
+                }
+                // The warning must come after the message.
+                if wi >= 0 && wi < mi {
+                    t.Error(tserr.InvalidFormat(&tserr.InvalidFormatArgs{
+                        F:      "promptUser output",
+                        Value:  got,
+                        Detail: "breaking-change warning must appear after the candidate message",
+                    }))
+                }
+                // The warning must come before the prompt.
+                if pi := strings.Index(got, "Apply this commit?"); pi >= 0 && wi > pi {
+                    t.Error(tserr.InvalidFormat(&tserr.InvalidFormatArgs{
+                        F:      "promptUser output",
+                        Value:  got,
+                        Detail: "breaking-change warning must appear before the prompt",
+                    }))
+                }
+            }
+            // If no warning is expected, the output must not contain one.
+            if tc.want == "" && strings.Contains(got, "BREAKING CHANGE detected") {
+                t.Error(tserr.InvalidFormat(&tserr.InvalidFormatArgs{
+                    F:      "promptUser output",
+                    Value:  got,
+                    Detail: "unexpected breaking-change warning for a message without a breaking-change marker",
+                }))
+            }
+        })
+    }
 }
 
 // TestPromptUserErrors tests promptUser with an
