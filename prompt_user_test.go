@@ -63,7 +63,7 @@ func TestPromptUserSelects(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			got, err := tscommit.PromptUser(context.Background(), p, "feat: xyz")
+			got, err := tscommit.PromptUser(context.Background(), p, "feat(x): xyz")
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -72,6 +72,10 @@ func TestPromptUserSelects(t *testing.T) {
 			// If the returned choice differs from the expectation, fail the test.
 			if got != tc.want {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "promptUser", Actual: got, Want: tc.want}))
+			}
+			// The candidate message must be visible to the user.
+			if !strings.Contains(buf.String(), "feat(x): xyz") {
+				t.Errorf("output %q does not show the candidate message", buf.String())
 			}
 			// If the retry expectation does not match the output, fail the test.
 			if retry := strings.Contains(buf.String(), "Unknown option"); retry != tc.wantRetry {
@@ -171,7 +175,7 @@ func TestPromptUserErrors(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			got, err := tscommit.PromptUser(tc.ctx, p, "feat: xyz")
+			got, err := tscommit.PromptUser(tc.ctx, p, "feat(x): xyz")
 			// If no error was returned, fail the test.
 			if err == nil {
 				t.Error(tserr.NilFailed("promptUser"))
@@ -248,7 +252,7 @@ var errFake = errors.New("editor failed") // The fake editor failure.
 // the editMessage seam so no real editor runs; it must not use t.Parallel.
 func TestEditInEditor(t *testing.T) {
 	// The initial text the fake editor must receive.
-	const initial = "feat: xyz"
+	const initial = "feat(x): xyz"
 	// Test cases.
 	cases := []struct {
 		name    string // The name of the test case.
@@ -257,7 +261,7 @@ func TestEditInEditor(t *testing.T) {
 		want    string // The expected returned message.
 		wantErr bool   // Whether an error is expected.
 	}{
-		{"edit returned unchanged", "feat: xyz\n\nBody text.", nil, "feat: xyz\n\nBody text.", false},
+		{"edit returned unchanged", "feat(x): xyz\n\nBody text.", nil, "feat(x): xyz\n\nBody text.", false},
 		{"editor error propagates", "", errFake, "", true},
 		{"empty edit rejected", "", nil, "", true},
 		{"whitespace-only edit rejected", " \t\n", nil, "", true},
@@ -305,12 +309,12 @@ func TestCheckEditedValid(t *testing.T) {
 		name   string
 		edited string
 	}{
-		{"simple message", "feat: xyz"},
-		{"trailing newline", "feat: xyz\n"},
+		{"simple message", "feat(x): xyz"},
+		{"trailing newline", "feat(x): xyz\n"},
 		{"single character", "x"},
 		// The edit is authoritative: surrounding whitespace is preserved,
 		// never trimmed or rewritten.
-		{"surrounding whitespace preserved", " feat: xyz "},
+		{"surrounding whitespace preserved", " feat(x): xyz "},
 		// Deliberately NOT a valid Conventional Commits message — user edits
 		// are not re-validated (design decision).
 		{"invalid format passes through", "just some text"},
