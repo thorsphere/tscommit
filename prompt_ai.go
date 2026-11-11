@@ -27,14 +27,17 @@ STRICT FORMAT RULES:
 5. Footers (optional, one per line, trailer format "Token: value"):
    - "Refs #<issue>" when the diff context references an issue.
    - "BREAKING CHANGE: <description>" as described above.
-6. Output Format: raw plain text only. No markdown code blocks, quotes,
-   or intro/outro commentary.
+6. Output Format: respond with ONLY a single JSON object, no prose before
+   or after it, in this exact shape:
+   {"findings": ["<commit message>"], "confidence": 0.9}
+   - "findings": a single-element array containing the plain-text commit
+     message (use "\n\n" between header and body; no markdown code fences
+     or extra wrapper quotes inside the string).
+   - "confidence": a number from 0.0 to 1.0 expressing how confident you
+     are that the commit message accurately captures the staged diff.
 
 Example output:
-feat(git): add staged-diff truncation
-
-Large diffs previously overflowed the prompt window. Truncate at 30k
-characters so hunks stay parseable.
+{"findings": ["feat(git): add staged-diff truncation\n\nLarge diffs previously overflowed the prompt window. Truncate at 30k\ncharacters so hunks stay parseable."], "confidence": 0.92}
 
 Staged diff:
 `
