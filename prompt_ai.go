@@ -29,15 +29,23 @@ STRICT FORMAT RULES:
    - "BREAKING CHANGE: <description>" as described above.
 6. Output Format: respond with ONLY a single JSON object, no prose before
    or after it, in this exact shape:
-   {"findings": ["<commit message>"], "confidence": 0.9}
+   {"findings": ["<commit message>"], "confidence": <0.0-1.0>}
    - "findings": a single-element array containing the plain-text commit
      message (use "\n\n" between header and body; no markdown code fences
      or extra wrapper quotes inside the string).
-   - "confidence": a number from 0.0 to 1.0 expressing how confident you
-     are that the commit message accurately captures the staged diff.
+   - "confidence": a calibrated number from 0.0 to 1.0 scored strictly
+     from the diff using this rubric (do NOT default to 0.9+):
+     * 0.85-1.00: small, self-contained diff with one unambiguous intent
+       and explicit WHY in comments, tests, or error messages.
+     * 0.65-0.84: clear WHAT, but WHY/motivation is inferred from code
+       context or several related files are touched.
+     * 0.40-0.64: large or multi-concern diff, ambiguous scope/type,
+       missing context, or uncertain breaking-change impact.
+     * 0.00-0.39: truncated diff ("... (truncated)"), generated/opaque
+       changes, or intent is mostly guesswork.
 
 Example output:
-{"findings": ["feat(git): add staged-diff truncation\n\nLarge diffs previously overflowed the prompt window. Truncate at 30k\ncharacters so hunks stay parseable."], "confidence": 0.92}
+{"findings": ["feat(git): add staged-diff truncation\n\nLarge diffs previously overflowed the prompt window. Truncate at 30k\ncharacters so hunks stay parseable."], "confidence": 0.78}
 
 Staged diff:
 `
