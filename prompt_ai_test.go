@@ -62,6 +62,10 @@ func TestPromptTemplateContract(t *testing.T) {
 		{"envelope findings key", `"findings":`},
 		{"envelope confidence key", `"confidence":`},
 		{"confidence scale", "from 0.0 to 1.0"},
+		{"confidence rubric high tier", "0.85-1.00"},
+		{"confidence rubric medium tier", "0.65-0.84"},
+		{"confidence rubric low tier", "0.40-0.64"},
+		{"confidence rubric lowest tier", "0.00-0.39"},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
