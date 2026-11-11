@@ -58,6 +58,10 @@ func TestPromptTemplateContract(t *testing.T) {
 		{"breaking footer spelling", "BREAKING CHANGE: "},
 		{"description minimum", "short description"},
 		{"scope rule", "<type>(<scope>)[!]: <short description>"},
+		{"single JSON object rule", "ONLY a single JSON object"},
+		{"envelope findings key", `"findings":`},
+		{"envelope confidence key", `"confidence":`},
+		{"confidence scale", "from 0.0 to 1.0"},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
