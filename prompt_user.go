@@ -53,15 +53,20 @@ func warnBreakingChange(p *lpcli.Prompter, msg string) {
 	}
 }
 
-// promptUser shows the candidate commit message, warns when it carries a
-// breaking-change marker, and asks the user whether to accept, edit,
-// regenerate, or cancel. Returns the selected choice value, or an empty
-// string if prompting fails.
-func promptUser(ctx context.Context, p *lpcli.Prompter, msg string) (string, error) {
+// promptUser returns the choice value selected by the user after showing msg,
+// displaying confidence when showConfidence is true, and warning when msg
+// carries a breaking-change marker, or an empty string and error if prompting
+// fails.
+func promptUser(ctx context.Context, p *lpcli.Prompter, msg string, confidence float64, showConfidence bool) (string, error) {
 	// Show the candidate commit message so the user can review it.
 	fmt.Fprintln(p.Out(), msg)
-	// Separate the message from the warning and prompt for readability.
+	// Separate the message from the metadata, warning, and prompt for readability.
 	fmt.Fprintln(p.Out())
+	// Display the AI confidence score when the message came from the model.
+	if showConfidence {
+		// Print the confidence score as a rounded integer percentage.
+		fmt.Fprintf(p.Out(), "Confidence: %.0f%%\n\n", confidence*100)
+	}
 	// Warn the user if the message contains a breaking-change marker.
 	warnBreakingChange(p, msg)
 	// Ask the user what to do.
