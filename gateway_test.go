@@ -9,6 +9,7 @@ import (
 	"context" // Import the context package for context handling.
 	"errors"  // Import the errors package for error handling.
 	"fmt"     // Import the fmt package for formatting quoted values in failures.
+	"math"    // Import the math package for NaN and infinity test values.
 	"strings" // Import the strings package for string handling.
 	"testing" // Import the testing package for unit tests.
 
@@ -19,8 +20,22 @@ import (
 
 // chatTurn is one scripted provider response: a canned result and an error.
 type chatTurn struct {
-	res tsaiclient.Result // The canned result for this call.
-	err error             // The canned error for this call.
+	res tsaiclient.JSONResult // The canned structured result for this call.
+	err error                 // The canned error for this call.
+}
+
+// okTurn returns a scripted chatTurn carrying a single-finding envelope with
+// msg and confidence.
+func okTurn(msg string, confidence float64) chatTurn {
+	// Wrap the message and confidence in a single-finding structured result.
+	return chatTurn{
+		res: tsaiclient.JSONResult{
+			Envelope: tsaiclient.Envelope{
+				Findings:   []string{msg},
+				Confidence: confidence,
+			},
+		},
+	}
 }
 
 // fakeChat implements the AI completion seam without a provider. It records
@@ -32,7 +47,7 @@ type fakeChat struct {
 }
 
 // run records the request and replays the next scripted turn.
-func (f *fakeChat) run(_ context.Context, _ *tsaiclient.Client, req *tsaiclient.Request) (tsaiclient.Result, error) {
+func (f *fakeChat) run(_ context.Context, _ *tsaiclient.Client, req *tsaiclient.Request) (tsaiclient.JSONResult, error) {
 	// Record the rendered request so prompts and session IDs can be asserted.
 	f.reqs = append(f.reqs, fmt.Sprintf("%+v", req))
 	// Count the invocation.
@@ -41,7 +56,7 @@ func (f *fakeChat) run(_ context.Context, _ *tsaiclient.Client, req *tsaiclient.
 	// assertion reports the over-invocation.
 	if f.calls > len(f.script) {
 		// Return an error for the unexpected extra call.
-		return tsaiclient.Result{}, errors.New("fakeChat: script exhausted")
+		return tsaiclient.JSONResult{}, errors.New("fakeChat: script exhausted")
 	}
 	// Replay the next scripted turn.
 	turn := f.script[f.calls-1]
@@ -61,52 +76,75 @@ func useFakeChat(t *testing.T, f *fakeChat) {
 
 // TestGenMessage tests genMessage: first-attempt acceptance, wrapper
 // cleaning, retry with validation feedback, retry with truncation feedback,
-// exhaustion, non-retryable empty content, and provider failure.
+// exhaustion, non-retryable empty content, envelope contract failures, and
+// provider/decode failure.
 func TestGenMessage(t *testing.T) {
 	// Define the test cases.
 	cases := []struct {
-		name        string
-		script      []chatTurn // The scripted provider turns.
-		want        string     // The expected message.
-		wantErr     bool       // Whether an error is expected.
-		wantErrText string     // Text the error must contain.
-		wantCalls   int        // The expected number of provider calls.
+		name           string
+		script         []chatTurn // The scripted provider turns.
+		want           string     // The expected message.
+		wantConfidence float64    // The expected confidence score.
+		wantErr        bool       // Whether an error is expected.
+		wantErrText    string     // Text the error must contain.
+		wantCalls      int        // The expected number of provider calls.
 	}{
 		{
-			name:      "valid on first attempt",
-			script:    []chatTurn{{res: tsaiclient.Result{Content: "feat(login): add login"}}},
-			want:      "feat(login): add login",
-			wantCalls: 1,
+			name:           "valid on first attempt",
+			script:         []chatTurn{okTurn("feat(login): add login", 0.92)},
+			want:           "feat(login): add login",
+			wantConfidence: 0.92,
+			wantCalls:      1,
 		},
 		{
-			name:      "wrapper formatting cleaned",
-			script:    []chatTurn{{res: tsaiclient.Result{Content: "\"feat(login): add login\""}}},
-			want:      "feat(login): add login",
-			wantCalls: 1,
+			name:           "wrapper formatting cleaned",
+			script:         []chatTurn{okTurn("\"feat(login): add login\"", 0.85)},
+			want:           "feat(login): add login",
+			wantConfidence: 0.85,
+			wantCalls:      1,
+		},
+		{
+			name:           "zero confidence boundary accepted",
+			script:         []chatTurn{okTurn("feat(login): add login", 0)},
+			want:           "feat(login): add login",
+			wantConfidence: 0,
+			wantCalls:      1,
+		},
+		{
+			name:           "max confidence boundary accepted",
+			script:         []chatTurn{okTurn("feat(login): add login", 1.0)},
+			want:           "feat(login): add login",
+			wantConfidence: 1.0,
+			wantCalls:      1,
 		},
 		{
 			name: "retry after validation failure",
 			script: []chatTurn{
-				{res: tsaiclient.Result{Content: "wip(login): x"}},
-				{res: tsaiclient.Result{Content: "feat(login): add login"}},
+				okTurn("wip(login): x", 0.4),
+				okTurn("feat(login): add login", 0.95),
 			},
-			want:      "feat(login): add login",
-			wantCalls: 2,
+			want:           "feat(login): add login",
+			wantConfidence: 0.95,
+			wantCalls:      2,
 		},
 		{
 			name: "retry after truncation",
 			script: []chatTurn{
-				{res: tsaiclient.Result{Content: "feat(login): add login", Truncated: true}},
-				{res: tsaiclient.Result{Content: "feat(login): add login"}},
+				{res: tsaiclient.JSONResult{
+					Envelope:  tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.8},
+					Truncated: true,
+				}},
+				okTurn("feat(login): add login", 0.9),
 			},
-			want:      "feat(login): add login",
-			wantCalls: 2,
+			want:           "feat(login): add login",
+			wantConfidence: 0.9,
+			wantCalls:      2,
 		},
 		{
 			name: "invalid on both attempts",
 			script: []chatTurn{
-				{res: tsaiclient.Result{Content: "wip(login): x"}},
-				{res: tsaiclient.Result{Content: "wip(login): y"}},
+				okTurn("wip(login): x", 0.5),
+				okTurn("wip(login): y", 0.5),
 			},
 			wantErr:     true,
 			wantErrText: "generate message",
@@ -115,25 +153,68 @@ func TestGenMessage(t *testing.T) {
 		{
 			name: "truncated on both attempts",
 			script: []chatTurn{
-				{res: tsaiclient.Result{Content: "feat(login): add login", Truncated: true}},
-				{res: tsaiclient.Result{Content: "feat(login): add login", Truncated: true}},
+				{res: tsaiclient.JSONResult{
+					Envelope:  tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.8},
+					Truncated: true,
+				}},
+				{res: tsaiclient.JSONResult{
+					Envelope:  tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.8},
+					Truncated: true,
+				}},
 			},
 			wantErr:     true,
 			wantErrText: "output was truncated by the token limit",
 			wantCalls:   2,
 		},
 		{
-			name:        "empty after cleaning is not retried",
-			script:      []chatTurn{{res: tsaiclient.Result{Content: "   "}}},
+			name:        "empty findings is not retried",
+			script:      []chatTurn{{res: tsaiclient.JSONResult{Envelope: tsaiclient.Envelope{Confidence: 0.9}}}},
 			wantErr:     true,
 			wantErrText: "AI client commit message",
 			wantCalls:   1,
 		},
 		{
-			name:        "provider failure is not retried",
-			script:      []chatTurn{{err: errors.New("boom")}},
+			name: "multiple findings is not retried",
+			script: []chatTurn{{res: tsaiclient.JSONResult{
+				Envelope: tsaiclient.Envelope{Findings: []string{"feat(a): one", "feat(b): two"}, Confidence: 0.9},
+			}}},
 			wantErr:     true,
-			wantErrText: "boom",
+			wantErrText: "AI client findings count",
+			wantCalls:   1,
+		},
+		{
+			name:        "negative confidence is not retried",
+			script:      []chatTurn{okTurn("feat(login): add login", -0.1)},
+			wantErr:     true,
+			wantErrText: "AI client confidence",
+			wantCalls:   1,
+		},
+		{
+			name:        "confidence above 1 is not retried",
+			script:      []chatTurn{okTurn("feat(login): add login", 1.1)},
+			wantErr:     true,
+			wantErrText: "AI client confidence",
+			wantCalls:   1,
+		},
+		{
+			name:        "NaN confidence is not retried",
+			script:      []chatTurn{okTurn("feat(login): add login", math.NaN())},
+			wantErr:     true,
+			wantErrText: "AI client confidence",
+			wantCalls:   1,
+		},
+		{
+			name:        "empty after cleaning is not retried",
+			script:      []chatTurn{okTurn("   ", 0.9)},
+			wantErr:     true,
+			wantErrText: "AI client commit message",
+			wantCalls:   1,
+		},
+		{
+			name:        "provider or decode failure is not retried",
+			script:      []chatTurn{{err: errors.New("decode envelope failed: invalid character")}},
+			wantErr:     true,
+			wantErrText: "decode envelope",
 			wantCalls:   1,
 		},
 	}
@@ -146,7 +227,7 @@ func TestGenMessage(t *testing.T) {
 			useFakeChat(t, fake)
 			// Generate the message; the nil client is never reached because
 			// the seam intercepts the only call site.
-			got, err := tscommit.GenMessage(context.Background(), nil, "diff --git a/x b/x", "session-42")
+			got, gotConf, err := tscommit.GenMessage(context.Background(), nil, "diff --git a/x b/x", "session-42")
 			// If the error state doesn't match, fail the test.
 			if (err != nil) != tc.wantErr {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "genMessage error", Actual: fmt.Sprintf("%v", err != nil), Want: fmt.Sprintf("%v", tc.wantErr)}))
@@ -154,6 +235,10 @@ func TestGenMessage(t *testing.T) {
 			// If the message differs from the expectation, fail the test.
 			if got != tc.want {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "genMessage", Actual: fmt.Sprintf("%q", got), Want: fmt.Sprintf("%q", tc.want)}))
+			}
+			// If the confidence differs from the expectation, fail the test.
+			if gotConf != tc.wantConfidence {
+				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "genMessage confidence", Actual: fmt.Sprintf("%v", gotConf), Want: fmt.Sprintf("%v", tc.wantConfidence)}))
 			}
 			// If the provider call count is wrong, fail the test.
 			if fake.calls != tc.wantCalls {
