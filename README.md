@@ -32,8 +32,12 @@ locally.
 - **Self-correcting generation** — generated messages are validated against
   the format rules; invalid or truncated output is fed back to the model
   with corrective feedback and regenerated.
-- **Clean output** — markdown code fences, backticks, and stray quotes
-  wrappers are stripped from model responses.
+- **Structured AI envelopes & calibrated confidence** — decodes structured
+  JSON responses (`findings` and `confidence`) via
+  `tsaiclient.Client.CompleteJSON`, scores confidence against a four-tier
+  diff-clarity rubric (`0%`–`100%`) displayed in the review prompt (omitted
+  once edited), and strips any stray markdown fences or wrapper quotes from
+  the message.
 - **Interactive review loop** — accept, edit in `$EDITOR`, regenerate, or
   cancel before anything is committed. User-edited messages are
   authoritative and never re-validated.
@@ -54,10 +58,10 @@ locally.
 
 1. Read the staged diff (truncated to 30,000 characters if needed).
 2. Send the diff to the configured AI provider with a strict Conventional
-   Commits prompt; validate the response and retry with feedback on
-   failure.
-3. Present the message interactively: **commit**, **edit**, **regenerate**,
-   or **cancel**.
+   Commits JSON envelope prompt; decode the structured response, validate
+   the commit message, and retry format/truncation violations with feedback.
+3. Present the message and model confidence interactively: **commit**,
+   **edit**, **regenerate**, or **cancel**.
 4. On commit, create the git commit with the reviewed message.
 
 ---
@@ -105,13 +109,26 @@ feat(git): add staged-diff truncation
 Large diffs previously overflowed the prompt window. Truncate at 30k
 characters so hunks stay parseable.
 
-Apply this commit?  [y] commit / [e] edit / [r] regenerate / [n] cancel
+Confidence: 78%
+
+Apply this commit? [Y/e/r/n] (Y=commit, e=edit, r=regenerate, n=cancel):
 ```
 
 - commit: create the git commit with the shown message.
-- edit: open the message in $EDITOR; the edited text is used as-is.
-- regenerate: ask the model for a fresh message for the same diff.
+- edit: open the message in $EDITOR; the edited text is used as-is (and the AI confidence line is omitted on re-prompt).
+- regenerate: ask the model for a fresh message and confidence score for the same diff.
 - cancel: abort without committing.
+
+### Confidence Score Rubric
+
+The model scores its confidence (`0.0`–`1.0`, displayed as `0%`–`100%`) against the staged diff:
+
+| Score | Meaning |
+| :--- | :--- |
+| **85%–100%** | Small, self-contained diff with one unambiguous intent and explicit `WHY` in comments, tests, or error messages. |
+| **65%–84%** | Clear `WHAT`, but `WHY`/motivation is inferred from code context or several related files are touched. |
+| **40%–64%** | Large or multi-concern diff, ambiguous scope/type, missing context, or uncertain breaking-change impact. |
+| **0%–39%** | Truncated diff (`... (truncated)`), generated/opaque changes, or intent is mostly guesswork. |
 
 ---
 
@@ -173,7 +190,7 @@ See the [Go Package Documentation](https://pkg.go.dev/github.com/thorsphere/tsco
 - The CLI is interactive and expects a TTY for prompting and editing; it is not intended for unattended CI use.
 - Only the OpenRouter provider is supported, via tsaiclient.
 - Messages you edit yourself are intentionally not re-validated. Your text is authoritative.
-- AI-generated output quality depends on the underlying model; format violations are retried once with feedback before failing.
+- AI-generated output quality and self-reported confidence scores depend on the underlying model; envelope/schema violations fail immediately, while message-format and truncation violations are retried once with feedback before failing.
 
 ---
 
