@@ -15,10 +15,9 @@ import (
 	"strings" // Import the strings package for string containment checks.
 	"testing" // Import the testing package for unit tests.
 
-	"github.com/thorsphere/lpcli"      // Import the lpcli package for command-line interface testing.
-	"github.com/thorsphere/tsaiclient" // Import the tsaiclient package for AI client testing.
-	"github.com/thorsphere/tscommit"   // Import the tscommit package under test.
-	"github.com/thorsphere/tserr"      // Import the tserr package for error reporting.
+	"github.com/thorsphere/lpcli"    // Import the lpcli package for command-line interface testing.
+	"github.com/thorsphere/tscommit" // Import the tscommit package under test.
+	"github.com/thorsphere/tserr"    // Import the tserr package for error reporting.
 )
 
 // TestAbortOr tests that abortOr normalizes user aborts to tserr.Aborted and
@@ -233,92 +232,101 @@ func TestRunContext(t *testing.T) {
 		wantEditText string     // The text the editor must receive; empty when the editor must not run.
 		wantSticky   bool       // Whether all provider calls must share one session ID.
 		wantWarn     bool       // Whether the breaking-change warning must be printed.
+		wantConfCnt  int        // The expected number of "Confidence:" lines; -1 skips the check.
 	}{
 		{
-			name:      "accept commits the generated message",
-			key:       testKey,
-			input:     "y\n",
-			diffOut:   diff,
-			chat:      []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
-			wantGit:   [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
-			wantCalls: 1,
+			name:        "accept commits the generated message",
+			key:         testKey,
+			input:       "y\n",
+			diffOut:     diff,
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			wantCalls:   1,
+			wantConfCnt: 1,
 		},
 		{
-			name:      "enter accepts the default choice",
-			key:       testKey,
-			input:     "\n",
-			diffOut:   diff,
-			chat:      []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
-			wantGit:   [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
-			wantCalls: 1,
+			name:        "enter accepts the default choice",
+			key:         testKey,
+			input:       "\n",
+			diffOut:     diff,
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			wantCalls:   1,
+			wantConfCnt: 1,
 		},
 		{
 			name:        "cancel aborts without committing",
 			key:         testKey,
 			input:       "n\n",
 			diffOut:     diff,
-			chat:        []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
 			wantErr:     true,
 			wantErrText: "commit aborted by user",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   1,
+			wantConfCnt: 1,
 		},
 		{
 			name:         "edit then accept commits the edited message",
 			key:          testKey,
 			input:        "e\ny\n",
 			diffOut:      diff,
-			chat:         []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:         []chatTurn{okTurn(firstMsg, 0.91)},
 			editOut:      editedMsg,
 			wantEditText: firstMsg,
 			wantGit:      [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", editedMsg}},
 			wantCalls:    1,
+			wantConfCnt:  1, // Shown before edit, omitted after edit.
 		},
 		{
-			name:       "regenerate then accept commits the fresh message",
-			key:        testKey,
-			input:      "r\ny\n",
-			diffOut:    diff,
-			chat:       []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}, {res: tsaiclient.Result{Content: secondMsg}}},
-			wantGit:    [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", secondMsg}},
-			wantCalls:  2,
-			wantSticky: true,
+			name:        "regenerate then accept commits the fresh message",
+			key:         testKey,
+			input:       "r\ny\n",
+			diffOut:     diff,
+			chat:        []chatTurn{okTurn(firstMsg, 0.75), okTurn(secondMsg, 0.94)},
+			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", secondMsg}},
+			wantCalls:   2,
+			wantSticky:  true,
+			wantConfCnt: 2, // Shown on both AI-generated turns.
 		},
 		{
-			name:      "breaking change warns before accept",
-			key:       testKey,
-			input:     "y\n",
-			diffOut:   diff,
-			chat:      []chatTurn{{res: tsaiclient.Result{Content: breakingMsg}}},
-			wantGit:   [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", breakingMsg}},
-			wantCalls: 1,
-			wantWarn:  true,
+			name:        "breaking change warns before accept",
+			key:         testKey,
+			input:       "y\n",
+			diffOut:     diff,
+			chat:        []chatTurn{okTurn(breakingMsg, 0.88)},
+			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", breakingMsg}},
+			wantCalls:   1,
+			wantWarn:    true,
+			wantConfCnt: 1,
 		},
 		{
 			name:         "editor failure aborts the run",
 			key:          testKey,
 			input:        "e\n",
 			diffOut:      diff,
-			chat:         []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:         []chatTurn{okTurn(firstMsg, 0.91)},
 			editErr:      errFake, // The editor failure defined in prompt_user_test.go.
 			wantEditText: firstMsg,
 			wantErr:      true,
 			wantErrText:  "editor failed",
 			wantGit:      [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:    1,
+			wantConfCnt:  1,
 		},
 		{
 			name:         "empty edit aborts the run",
 			key:          testKey,
 			input:        "e\n",
 			diffOut:      diff,
-			chat:         []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:         []chatTurn{okTurn(firstMsg, 0.91)},
 			editOut:      " \t\n",
 			wantEditText: firstMsg,
 			wantErr:      true,
 			wantErrText:  "commit message after edit",
 			wantGit:      [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:    1,
+			wantConfCnt:  1,
 		},
 		{
 			name:        "generation failure surfaces before prompting",
@@ -329,29 +337,32 @@ func TestRunContext(t *testing.T) {
 			wantErrText: "provider boom",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   1,
+			wantConfCnt: 0,
 		},
 		{
 			name:        "regeneration failure aborts the run",
 			key:         testKey,
 			input:       "r\n",
 			diffOut:     diff,
-			chat:        []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}, {err: genErr}},
+			chat:        []chatTurn{okTurn(firstMsg, 0.91), {err: genErr}},
 			wantErr:     true,
 			wantErrText: "provider boom",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   2,
+			wantConfCnt: 1,
 		},
 		{
 			name:        "commit failure surfaces",
 			key:         testKey,
 			input:       "y\n",
 			diffOut:     diff,
-			chat:        []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
 			commitErr:   errors.New("exit status 1"),
 			wantErr:     true,
 			wantErrText: "commit git failed",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
 			wantCalls:   1,
+			wantConfCnt: 1,
 		},
 		{
 			name:        "staged diff failure surfaces",
@@ -361,6 +372,7 @@ func TestRunContext(t *testing.T) {
 			wantErrText: "diff git failed",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   0,
+			wantConfCnt: 0,
 		},
 		{
 			name:        "nothing staged surfaces",
@@ -370,6 +382,7 @@ func TestRunContext(t *testing.T) {
 			wantErrText: "git staged changes",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   0,
+			wantConfCnt: 0,
 		},
 		{
 			name:        "missing API key fails before any work",
@@ -378,29 +391,32 @@ func TestRunContext(t *testing.T) {
 			wantErrText: "new client",
 			wantGit:     nil, // Git must not be invoked at all.
 			wantCalls:   0,
+			wantConfCnt: 0,
 		},
 		{
 			name:        "cancelled context aborts at the prompt",
 			key:         testKey,
 			input:       "y\n",
 			diffOut:     diff,
-			chat:        []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
 			cancelled:   true,
 			wantErr:     true,
 			wantErrText: "commit aborted by user",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   1,
+			wantConfCnt: 1,
 		},
 		{
 			name:        "exhausted input aborts at the prompt",
 			key:         testKey,
 			input:       "",
 			diffOut:     diff,
-			chat:        []chatTurn{{res: tsaiclient.Result{Content: firstMsg}}},
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
 			wantErr:     true,
 			wantErrText: "tscommit aborted by user", // The raw prompter abort passes through abortOr.
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
 			wantCalls:   1,
+			wantConfCnt: 1,
 		},
 	}
 	// Run the test cases.
@@ -486,9 +502,15 @@ func TestRunContext(t *testing.T) {
 					}
 				}
 			}
+			// Read the captured output once for layout checks.
+			out := captured()
 			// Check the breaking-change warning against the captured output.
-			if warn := strings.Contains(captured(), tscommit.BreakingWarning); warn != tc.wantWarn {
+			if warn := strings.Contains(out, tscommit.BreakingWarning); warn != tc.wantWarn {
 				t.Errorf("breaking-change warning present = %v, want %v", warn, tc.wantWarn)
+			}
+			// Check how many times the AI confidence line was displayed.
+			if gotConfCnt := strings.Count(out, "Confidence:"); tc.wantConfCnt >= 0 && gotConfCnt != tc.wantConfCnt {
+				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Confidence line count", Actual: fmt.Sprintf("%d", gotConfCnt), Want: fmt.Sprintf("%d", tc.wantConfCnt)}))
 			}
 		})
 	}
@@ -520,7 +542,7 @@ func TestRun(t *testing.T) {
 			key:     "sk-or-v1-test-key",
 			input:   "y\n",
 			diffOut: diff,
-			chat:    []chatTurn{{res: tsaiclient.Result{Content: msg}}},
+			chat:    []chatTurn{okTurn(msg, 0.9)},
 			wantGit: [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", msg}},
 		},
 		{
@@ -535,7 +557,7 @@ func TestRun(t *testing.T) {
 			key:         "sk-or-v1-test-key",
 			input:       "n\n",
 			diffOut:     diff,
-			chat:        []chatTurn{{res: tsaiclient.Result{Content: msg}}},
+			chat:        []chatTurn{okTurn(msg, 0.9)},
 			wantErr:     true,
 			wantErrText: "commit aborted by user",
 			wantGit:     [][]string{{"diff", "--staged", "-W"}},
