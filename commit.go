@@ -46,16 +46,18 @@ func RunContext(ctx context.Context) error {
 	// regenerations land on the same provider endpoint and can reuse the
 	// prompt cache.
 	sessionID := newSessionID()
-	// Generate the initial commit message.
-	msg, err := genMessage(ctx, client, diff, sessionID)
+	// Generate the initial commit message and model confidence score.
+	msg, confidence, err := genMessage(ctx, client, diff, sessionID)
 	// Return the error if message generation fails.
 	if err != nil {
 		return err
 	}
+	// Track whether the current message came directly from the AI model.
+	showConfidence := true
 	// Prompt the user until they accept, edit, regenerate, or cancel.
 	for {
 		// Ask the user what to do with the current message.
-		choice, err := promptUser(ctx, p, msg)
+		choice, err := promptUser(ctx, p, msg, confidence, showConfidence)
 		// Return the error if prompting fails.
 		if err != nil {
 			return abortOr(ctx, err)
@@ -74,13 +76,17 @@ func RunContext(ctx context.Context) error {
 			}
 			// Adopt the user's edit as the new message; it is authoritative.
 			msg = edited
+			// Omit the AI confidence score once the user has edited the message.
+			showConfidence = false
 		case choiceRegenerate:
-			// Generate a fresh message for the same diff and session.
-			msg, err = genMessage(ctx, client, diff, sessionID)
+			// Generate a fresh message and confidence score for the same diff and session.
+			msg, confidence, err = genMessage(ctx, client, diff, sessionID)
 			// Return the error if message generation fails.
 			if err != nil {
 				return abortOr(ctx, err)
 			}
+			// Re-enable the AI confidence display for the newly generated message.
+			showConfidence = true
 		case choiceCancel:
 			// Return an aborted error when the user cancels.
 			return tserr.Aborted("commit")
