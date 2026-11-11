@@ -56,7 +56,7 @@ func SetEditMessage(fn func(ctx context.Context, p *lpcli.Prompter, initialText 
 
 // SetCompleteChat swaps the AI completion seam for tests and returns a restore
 // function (pass it to t.Cleanup). Tests using it must not call t.Parallel.
-func SetCompleteChat(fn func(ctx context.Context, client *tsaiclient.Client, req *tsaiclient.Request) (tsaiclient.Result, error)) func() {
+func SetCompleteChat(fn func(ctx context.Context, client *tsaiclient.Client, req *tsaiclient.Request) (tsaiclient.JSONResult, error)) func() {
 	// Save the current completion seam.
 	prev := completeChat
 	// Set the new completion seam.
