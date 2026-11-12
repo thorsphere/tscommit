@@ -13,55 +13,61 @@ Minimalist Go CLI tool for generating conventional git commit messages from stag
 
 ---
 
-Package `tscommit` generates conventional git commit messages from the
-staged diff via a configured AI provider and creates the commit after
-interactive user review. It is a component-agnostic library: the AI
+Package `tscommit` generates conventional git commit messages from diffs
+via a configured AI provider. It is a component-agnostic library: the AI
 provider API key is read from the environment, and no state is persisted
-locally.
+locally. The non-interactive generation core (`Generator`) is reusable by
+any service or workflow, while an optional interactive CLI layer
+(`Run`/`RunContext`) drives user review and creates the commit.
 
 ---
 
 ## Features
 
-- **Conventional Commits output** — strict `<type>(<scope>)[!]: <description>`
+- **Conventional Commits output**: strict `<type>(<scope>)[!]: <description>`
   headers (72-character limit, imperative mood, mandatory scope) with a
   72-column body explaining WHAT and WHY, and optional trailers such as
   `Refs #<issue>` or `BREAKING CHANGE:`.
-- **Generation from the staged diff** — reads `git diff --staged -W` and
-  summarizes the dominant intent rather than listing files.
-- **Self-correcting generation** — generated messages are validated against
+- **Generation from diffs**: generates messages from unified diffs (the
+  CLI feeds `git diff --staged -W`) and summarizes the dominant intent
+  rather than listing files.
+- **Self-correcting generation**: generated messages are validated against
   the format rules; invalid or truncated output is fed back to the model
   with corrective feedback and regenerated.
-- **Structured AI envelopes & calibrated confidence** — decodes structured
+- **Structured AI envelopes & calibrated confidence**: decodes structured
   JSON responses (`findings` and `confidence`) via
   `tsaiclient.Client.CompleteJSON`, scores confidence against a four-tier
-  diff-clarity rubric (`0%`–`100%`) displayed in the review prompt (omitted
-  once edited), and strips any stray markdown fences or wrapper quotes from
-  the message.
-- **Interactive review loop** — accept, edit in `$EDITOR`, regenerate, or
+  diff-clarity rubric (`0%`–`100%`) returned in `Message.Confidence` and
+  displayed in the interactive review prompt (omitted once edited), and
+  strips any stray markdown fences or wrapper quotes from the message.
+- **Interactive review loop**: accept, edit in `$EDITOR`, regenerate, or
   cancel before anything is committed. User-edited messages are
   authoritative and never re-validated.
-- **Breaking-change awareness** — prominent warning when the message
+- **Breaking-change awareness**: prominent warning when the message
   carries a Conventional Commits breaking-change marker.
-- **Large-diff handling** — diffs are truncated at 30,000 characters
-  (runes) with an explicit truncation marker, keeping prompts within the
-  model's context window.
-- **Prompt-cache friendly** — one sticky session ID per run so retries and
+- **Large-diff handling**: the CLI truncates staged diffs at 30,000
+  characters (runes) with an explicit truncation marker, keeping prompts
+  within the model's context window. Non-interactive callers bound diff
+  size themselves (e.g. an HTTP request-body limit) before calling
+  `Generate`.
+- **Prompt-cache friendly**: one sticky session ID per run so retries and
   regenerations reuse the provider endpoint and prompt cache.
-- **Graceful cancellation** — Ctrl-C or SIGTERM aborts cleanly at any step.
-- **Library-friendly** — the same workflow is available programmatically
-  via `tscommit.Run` and `tscommit.RunContext`.
+- **Graceful cancellation**: Ctrl-C or SIGTERM aborts cleanly at any step.
+- **Library-friendly**: the interactive workflow is available
+  programmatically via `tscommit.Run` and `tscommit.RunContext`, and the
+  non-interactive generation core via `tscommit.Generator`.
 
 ---
 
 ## How It Works
 
-1. Read the staged diff (truncated to 30,000 characters if needed).
+1. Read the staged diff (the CLI truncates it to 30,000 characters if
+   needed).
 2. Send the diff to the configured AI provider with a strict Conventional
    Commits JSON envelope prompt; decode the structured response, validate
    the commit message, and retry format/truncation violations with feedback.
-3. Present the message and model confidence interactively: **commit**,
-   **edit**, **regenerate**, or **cancel**.
+3. In the interactive workflow, present the message and model confidence
+   and ask the user to **commit**, **edit**, **regenerate**, or **cancel**.
 4. On commit, create the git commit with the reviewed message.
 
 ---
@@ -70,7 +76,7 @@ locally.
 
 Requires Go 1.27 or later, git, and an [OpenRouter](https://openrouter.ai) API key.
 
-There is no prebuilt binary; the CLI lives in `cmd/tscommit` and is built
+There is no prebuilt binary; the CLI lives in `cmd/cli` and is built
 from source.
 
 Clone the repository and build the CLI:
@@ -78,13 +84,13 @@ Clone the repository and build the CLI:
 ```sh
 git clone https://github.com/thorsphere/tscommit.git
 cd tscommit
-go build -o tscommit ./cmd/tscommit
+go build -o tscommit ./cmd/cli
 ```
 
 Or run it directly without building:
 
 ```sh
-go run ./cmd/tscommit
+go run ./cmd/cli
 ```
 
 Provide your API key via the environment (twelve-factor style):
@@ -151,7 +157,8 @@ timeout.
 
 ## API reference
 
-The root package exposes the workflow as a library:
+The root package exposes both the interactive workflow and the
+non-interactive generation core as a library:
 
 ```go
 // Run executes the tscommit workflow with a background context.
@@ -159,9 +166,17 @@ func Run() error
 
 // RunContext executes the tscommit workflow with the provided context.
 func RunContext(ctx context.Context) error
+
+// NewGenerator returns a Generator configured from the environment with a
+// freshly minted sticky routing key.
+func NewGenerator() (*Generator, error)
+
+// Generate returns a validated Conventional Commits Message and model
+// confidence score for diff.
+func (g *Generator) Generate(ctx context.Context, diff string) (Message, error)
 ```
 
-Typical embedding:
+Typical embedding of the interactive workflow:
 
 ```go
 package main
@@ -179,13 +194,40 @@ func main() {
 }
 ```
 
+Typical non-interactive use of the generation core (e.g. from a service
+handler that has already bounded the request body size):
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/thorsphere/tscommit"
+)
+
+func main() {
+    gen, err := tscommit.NewGenerator()
+    if err != nil {
+        panic(err)
+    }
+    msg, err := gen.Generate(context.Background(), diff)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(msg.Text)
+}
+```
+
 See the [Go Package Documentation](https://pkg.go.dev/github.com/thorsphere/tscommit) for the complete reference.
 
 ---
 
 ## Known Limitations
 
-- Diffs longer than 30,000 characters are truncated (marked with a truncation marker); hunks beyond the limit are not described.
+- Diffs longer than 30,000 characters are truncated by the CLI (marked with a truncation marker); hunks beyond the limit are not described.
+- Non-interactive callers must bound diff size before calling `Generate` (e.g. reject oversized request bodies with `400 Bad Request` in a service handler); `Generate` does not truncate.
 - Only staged changes are considered — unstaged or untracked work is invisible to the generator.
 - The CLI is interactive and expects a TTY for prompting and editing; it is not intended for unattended CI use.
 - Only the OpenRouter provider is supported, via tsaiclient.
