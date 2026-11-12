@@ -66,7 +66,7 @@ func SetCompleteChat(fn func(ctx context.Context, client *tsaiclient.Client, req
 }
 
 // SetExecGit swaps the git execution seam for tests and returns a restore
-// function (pass it to t.Cleanup).
+// function (pass it to t.Cleanup). Tests using it must not call t.Parallel.
 func SetExecGit(fn func(ctx context.Context, stdout, stderr io.Writer, args ...string) error) func() {
 	// Save the current git execution seam.
 	prev := execGit
@@ -74,4 +74,28 @@ func SetExecGit(fn func(ctx context.Context, stdout, stderr io.Writer, args ...s
 	execGit = fn
 	// Return a function to restore the previous git execution seam.
 	return func() { execGit = prev }
+}
+
+// SetNewPrompter swaps the prompter construction seam for tests and returns a
+// restore function (pass it to t.Cleanup). Tests using it must not call
+// t.Parallel.
+func SetNewPrompter(fn func() *lpcli.Prompter) func() {
+	// Save the current prompter construction seam.
+	prev := newPrompter
+	// Set the new prompter construction seam.
+	newPrompter = fn
+	// Return a function to restore the previous prompter construction seam.
+	return func() { newPrompter = prev }
+}
+
+// SetSelectChoice swaps the prompt selection seam for tests and returns a
+// restore function (pass it to t.Cleanup). Tests using it must not call
+// t.Parallel.
+func SetSelectChoice(fn func(ctx context.Context, p *lpcli.Prompter, opts lpcli.SelectOptions) (string, error)) func() {
+	// Save the current selection seam.
+	prev := selectChoice
+	// Set the new selection seam.
+	selectChoice = fn
+	// Return a function to restore the previous selection seam.
+	return func() { selectChoice = prev }
 }

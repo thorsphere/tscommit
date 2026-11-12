@@ -224,6 +224,7 @@ func TestRunContext(t *testing.T) {
 		editOut      string     // The content the fake editor returns.
 		editErr      error      // The error the fake editor returns.
 		commitErr    error      // The canned commit failure.
+		choices      []string   // Optional canned choice values returned by the selectChoice seam.
 		cancelled    bool       // Whether the context is cancelled before the run.
 		wantErr      bool       // Whether an error is expected.
 		wantErrText  string     // Text the error must contain.
@@ -233,13 +234,24 @@ func TestRunContext(t *testing.T) {
 		wantSticky   bool       // Whether all provider calls must share one session ID.
 		wantWarn     bool       // Whether the breaking-change warning must be printed.
 		wantConfCnt  int        // The expected number of "Confidence:" lines; -1 skips the check.
+		wantOutText  string     // Optional text that must appear in the captured output.
 	}{
 		{
 			name:        "accept commits the generated message",
 			key:         testKey,
-			input:       "y\n",
 			diffOut:     diff,
 			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			wantCalls:   1,
+			wantConfCnt: 1,
+			input:       "y\n",
+		},
+		{
+			name:        "large staged diff is truncated at CLI boundary before generation",
+			key:         testKey,
+			input:       "y\n",
+			diffOut:     strings.Repeat("d", tscommit.MaxDiffChars+50),
+			chat:        []chatTurn{okTurn(firstMsg, 0.62)},
 			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
 			wantCalls:   1,
 			wantConfCnt: 1,
@@ -418,6 +430,17 @@ func TestRunContext(t *testing.T) {
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
+		{
+			name:        "unhandled choice warns and re-prompts before accepting",
+			key:         testKey,
+			diffOut:     diff,
+			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			choices:     []string{"surprise", tscommit.ChoiceAccept},
+			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			wantCalls:   1,
+			wantConfCnt: 2,
+			wantOutText: `Ignoring unhandled option "surprise"; please choose again.`,
+		},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
@@ -432,6 +455,24 @@ func TestRunContext(t *testing.T) {
 			fake := &fakeChat{script: tc.chat}
 			// Swap the AI seam for the duration of the test.
 			useFakeChat(t, fake)
+			// Swap the selection seam when the scenario specifies explicit choice values.
+			if len(tc.choices) > 0 {
+				// Track the current index in the scripted choice sequence.
+				choiceIdx := 0
+				// Swap selectChoice for the duration of the subtest.
+				t.Cleanup(tscommit.SetSelectChoice(func(_ context.Context, _ *lpcli.Prompter, _ lpcli.SelectOptions) (string, error) {
+					// Return an error if the scripted choices are exhausted.
+					if choiceIdx >= len(tc.choices) {
+						return "", errors.New("selectChoice script exhausted")
+					}
+					// Advance and return the next scripted choice.
+					c := tc.choices[choiceIdx]
+					// Increment the scripted choice index.
+					choiceIdx++
+					// Return the scripted choice and nil error.
+					return c, nil
+				}))
+			}
 			// Track the editor invocations and the text the editor receives.
 			editorText, editorCalls := "", 0
 			// Swap the editor seam for the duration of the test.
@@ -511,6 +552,18 @@ func TestRunContext(t *testing.T) {
 			// Check how many times the AI confidence line was displayed.
 			if gotConfCnt := strings.Count(out, "Confidence:"); tc.wantConfCnt >= 0 && gotConfCnt != tc.wantConfCnt {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Confidence line count", Actual: fmt.Sprintf("%d", gotConfCnt), Want: fmt.Sprintf("%d", tc.wantConfCnt)}))
+			}
+			// Check for any required output substring.
+			if tc.wantOutText != "" && !strings.Contains(out, tc.wantOutText) {
+				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "captured output", Actual: out, Want: tc.wantOutText}))
+			}
+			// When the staged diff exceeded MaxDiffChars, verify the prompt sent to the
+			// AI provider carried the truncation marker rather than the raw excess.
+			if len([]rune(tc.diffOut)) > tscommit.MaxDiffChars && len(fake.reqs) > 0 {
+				// Fail if the truncation marker is absent from the first provider request.
+				if !strings.Contains(fake.reqs[0], "... (truncated)") {
+					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "provider prompt", Actual: fake.reqs[0], Want: "prompt containing ... (truncated)"}))
+				}
 			}
 		})
 	}
