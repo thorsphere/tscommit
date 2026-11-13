@@ -14,11 +14,11 @@ import (
 
 // Defaults for provider and request settings.
 const (
-	defaultModel               = "google/gemini-4-carbon" // The default model identifier.
-	defaultMaxCompletionTokens = 16000                    // The default cap on generated tokens.
-	defaultTemperature         = 0.3                      // The default sampling temperature.
-	defaultReasoningEffort     = "medium"                 // The default reasoning effort level.
-	defaultTimeout             = 3 * time.Minute          // The default request timeout.
+	defaultModel               = "google/gemini-4-hydrogen" // The default model identifier.
+	defaultMaxCompletionTokens = 16000                      // The default cap on generated tokens.
+	defaultTemperature         = 0.3                        // The default sampling temperature.
+	defaultReasoningEffort     = "medium"                   // The default reasoning effort level.
+	defaultTimeout             = 3 * time.Minute            // The default request timeout.
 )
 
 // newClient returns the AI client used for commit message generation. It
