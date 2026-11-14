@@ -49,3 +49,24 @@ func TestNewClient(t *testing.T) {
 		})
 	}
 }
+
+// TestTimeoutBounds verifies that DefaultTimeout is positive and that
+// MaxGenerateDuration is at least DefaultTimeout.
+func TestTimeoutBounds(t *testing.T) {
+	// Verify DefaultTimeout is strictly positive.
+	if tscommit.DefaultTimeout <= 0 {
+		t.Error(tserr.Higher(&tserr.HigherArgs{
+			Var:        "DefaultTimeout",
+			Actual:     int64(tscommit.DefaultTimeout),
+			LowerBound: 1,
+		}))
+	}
+	// Verify MaxGenerateDuration covers at least one full DefaultTimeout attempt.
+	if tscommit.MaxGenerateDuration < tscommit.DefaultTimeout {
+		t.Error(tserr.Higher(&tserr.HigherArgs{
+			Var:        "MaxGenerateDuration",
+			Actual:     int64(tscommit.MaxGenerateDuration),
+			LowerBound: int64(tscommit.DefaultTimeout),
+		}))
+	}
+}

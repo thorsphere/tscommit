@@ -14,11 +14,18 @@ import (
 
 // Defaults for provider and request settings.
 const (
+	// DefaultTimeout is the per-attempt AI provider request timeout.
+	DefaultTimeout = 2 * time.Minute
+	// MaxGenerateDuration is the worst-case wall-clock budget for a single
+	// Generate call across all retry attempts.
+	MaxGenerateDuration        = maxGenAttempts * DefaultTimeout
 	defaultModel               = "google/gemini-4-hydrogen" // The default model identifier.
 	defaultMaxCompletionTokens = 16000                      // The default cap on generated tokens.
 	defaultTemperature         = 0.3                        // The default sampling temperature.
-	defaultReasoningEffort     = "medium"                   // The default reasoning effort level.
-	defaultTimeout             = 3 * time.Minute            // The default request timeout.
+	defaultReasoningEffort     = "high"                     // The default reasoning effort level.
+	maxGenAttempts             = 2                          // The maximum number of provider calls per message (1 initial + retries with feedback).
+	minConfidence              = 0.0                        // The minimum allowed confidence score.
+	maxConfidence              = 1.0                        // The maximum allowed confidence score.
 )
 
 // newClient returns the AI client used for commit message generation. It
@@ -34,7 +41,7 @@ func newClient() (*tsaiclient.Client, error) {
 	cfg = cfg.WithMaxCompletionTokens(defaultMaxCompletionTokens).
 		WithTemperature(defaultTemperature).
 		WithReasoningEffort(defaultReasoningEffort).
-		WithTimeout(defaultTimeout)
+		WithTimeout(DefaultTimeout)
 	// Build the OpenRouter provider with app attribution headers.
 	p := tsaiclient.NewOpenRouter().
 		WithReferer("https://github.com/thorsphere/tscommit").

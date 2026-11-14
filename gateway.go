@@ -17,13 +17,6 @@ import (
 	"github.com/thorsphere/tserr"      // Import the tserr package for error handling.
 )
 
-// Envelope bounds for commit message generation.
-const (
-	maxGenAttempts = 2   // The maximum number of provider calls per message (1 initial + retries with feedback).
-	minConfidence  = 0.0 // The minimum allowed confidence score in the envelope.
-	maxConfidence  = 1.0 // The maximum allowed confidence score in the envelope.
-)
-
 // completeChat sends req to client and returns the decoded structured result.
 // It is a package-level seam so tests can swap out the external AI call.
 var completeChat = func(ctx context.Context, client *tsaiclient.Client, req *tsaiclient.Request) (tsaiclient.JSONResult, error) {
