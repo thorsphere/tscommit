@@ -18,10 +18,6 @@ import (
 var headerRe = regexp.MustCompile(
 	`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\([a-z0-9._/-]+\))!?: \S(.*[^.\s])?$`)
 
-// breakingFooterRe matches a "BREAKING CHANGE:" or "BREAKING-CHANGE:" footer
-// line (anchored to the start of a line).
-var breakingFooterRe = regexp.MustCompile(`(?m)^BREAKING[- ]CHANGE:`)
-
 // validateMessage checks that msg conforms to the strict format rules and
 // returns a descriptive error suitable for feeding back to the model.
 // Trailing newlines are ignored (git convention), so a header-only message
@@ -81,22 +77,4 @@ func validateMessage(msg string) error {
 	}
 	// Return no error to indicate success.
 	return nil
-}
-
-// hasBreakingChange reports whether msg declares a breaking change via the
-// "!" header marker or a "BREAKING CHANGE:" footer.
-// It ignores trailing newlines (git convention), matching validateMessage.
-func hasBreakingChange(msg string) bool {
-	// Ignore trailing newlines (git convention), matching validateMessage.
-	msg = strings.TrimRight(msg, "\n")
-	// Split the message into header and remainder.
-	header, _, _ := strings.Cut(msg, "\n")
-	// Check for the breaking-change marker: a "!" immediately before the
-	// ": " separator (e.g. "feat!: x" or "feat(api)!: x"). This ignores
-	// exclamation marks elsewhere in the description.
-	if i := strings.Index(header, ": "); strings.HasSuffix(header[:max(i, 0)], "!") {
-		return true
-	}
-	// Otherwise check for a "BREAKING CHANGE:" footer line.
-	return breakingFooterRe.MatchString(msg)
 }

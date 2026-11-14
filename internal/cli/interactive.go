@@ -2,20 +2,19 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
-package tscommit
+package cli
 
 // Import packages
 import (
-	"bytes"   // Import the bytes package for buffering git output.
 	"context" // Import the context package for cancellation-aware operations.
 	"fmt"     // Import the fmt package for formatted output and error wrapping.
-	"io"      // Import the io package for stream interfaces.
-	"os"      // Import the os package for standard output and error streams.
-	"os/exec" // Import the exec package for executing the git binary.
+	"regexp"  // Import the regexp package for matching breaking change footers.
 	"strings" // Import the strings package for string trimming and formatting.
 
-	"github.com/thorsphere/lpcli" // Import the lpcli package for interactive prompting.
-	"github.com/thorsphere/tserr" // Import the tserr package for error reporting.
+	"github.com/thorsphere/lpcli"                 // Import the lpcli package for interactive prompting.
+	"github.com/thorsphere/tscommit"              // Import the tscommit package for commit message generation.
+	"github.com/thorsphere/tscommit/internal/git" // Import the internal git package for git operations.
+	"github.com/thorsphere/tserr"                 // Import the tserr package for error reporting.
 )
 
 // The choices the user can select when prompting for commit action.
@@ -33,10 +32,9 @@ const breakingWarning = "⚠ BREAKING CHANGE detected. This commit triggers a ma
 // sent to the AI provider by the interactive CLI workflow.
 const maxDiffChars = 30000 // The staged diff size limit.
 
-// gitExec runs a git command with the given arguments, streaming stdout and
-// stderr to the provided writers. It is a seam so unit tests can run without
-// the git binary installed (swapped via SetExecGit in export_test.go).
-type gitExec func(ctx context.Context, stdout, stderr io.Writer, args ...string) error
+// breakingFooterRe matches a "BREAKING CHANGE:" or "BREAKING-CHANGE:" footer
+// line (anchored to the start of a line).
+var breakingFooterRe = regexp.MustCompile(`(?m)^BREAKING[- ]CHANGE:`)
 
 // commitChoices is the set of choices the user can select when prompting for
 // commit action.
@@ -74,17 +72,22 @@ var editMessage = func(ctx context.Context, p *lpcli.Prompter, initialText strin
 	return p.Edit(ctx, initialText)
 }
 
-// execGit executes a real git command via os/exec. It is the one piece of
-// git execution that unit tests never run: tests must not depend on the git
-// binary, so they swap this seam via SetExecGit.
-var execGit gitExec = func(ctx context.Context, stdout, stderr io.Writer, args ...string) error {
-	// Create the git command bound to the context.
-	cmd := exec.CommandContext(ctx, "git", args...)
-	// Redirect the command's output to the given writers.
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	// Run the command and return any error.
-	return cmd.Run()
+// stagedDiff reads the staged git diff bounded to maxLen characters. It is
+// the git diff seam, swapped via SetStagedDiff in export_test.go so unit
+// tests never run the git binary.
+var stagedDiff = git.StagedDiff
+
+// commit creates a git commit with the message msg. It is the git commit
+// seam, swapped via SetCommit in export_test.go so unit tests never run the
+// git binary.
+var commit = git.Commit
+
+// generateMessage generates a commit message for diff with gen. It is the
+// generation seam, swapped via SetGenerateMessage in export_test.go so unit
+// tests script generation outcomes without a network call.
+var generateMessage = func(ctx context.Context, gen *tscommit.Generator, diff string) (tscommit.Message, error) {
+	// Delegate to the generator.
+	return gen.Generate(ctx, diff)
 }
 
 // Run executes the interactive tscommit workflow with a background context.
@@ -94,12 +97,13 @@ func Run() error {
 }
 
 // RunContext executes the interactive tscommit workflow with ctx: builds a
-// Generator from environment configuration, reads and truncates the staged git
-// diff, generates a commit message, prompts the user to accept, edit,
-// regenerate, or cancel, and creates the git commit upon acceptance.
+// Generator from environment configuration, reads the staged git diff bounded
+// to maxDiffChars characters, generates a commit message, prompts the user to
+// accept, edit, regenerate, or cancel, and creates the git commit upon
+// acceptance.
 func RunContext(ctx context.Context) error {
 	// Build the non-interactive generator; it validates the provider and API key.
-	gen, err := NewGenerator()
+	gen, err := tscommit.NewGenerator()
 	// Return the error if the generator cannot be built.
 	if err != nil {
 		return err
@@ -113,7 +117,7 @@ func RunContext(ctx context.Context) error {
 		return err
 	}
 	// Generate the initial commit message and model confidence score.
-	res, err := gen.Generate(ctx, diff)
+	res, err := generateMessage(ctx, gen, diff)
 	// Return the error if message generation fails.
 	if err != nil {
 		return err
@@ -148,7 +152,7 @@ func RunContext(ctx context.Context) error {
 			showConfidence = false
 		case choiceRegenerate:
 			// Generate a fresh message and confidence score on the same generator.
-			res, err = gen.Generate(ctx, diff)
+			res, err = generateMessage(ctx, gen, diff)
 			// Return the error if message generation fails.
 			if err != nil {
 				return abortOr(ctx, err)
@@ -248,73 +252,20 @@ func checkEdited(edited string) (string, error) {
 	return edited, nil
 }
 
-// runGit runs git, streaming stdout and stderr to the given writers while
-// capturing stderr so failures can carry git's diagnostic text.
-func runGit(ctx context.Context, stdout, stderr io.Writer, args ...string) error {
-	// Capture stderr alongside the caller's writer.
-	var errBuf bytes.Buffer
-	// Run git and enrich any error with the captured diagnostic.
-	if err := execGit(ctx, stdout, io.MultiWriter(stderr, &errBuf), args...); err != nil {
-		return gitErr(err, errBuf.String())
+// hasBreakingChange reports whether msg declares a breaking change via the
+// "!" header marker or a "BREAKING CHANGE:" footer.
+// It ignores trailing newlines (git convention), matching validateMessage.
+func hasBreakingChange(msg string) bool {
+	// Ignore trailing newlines (git convention), matching validateMessage.
+	msg = strings.TrimRight(msg, "\n")
+	// Split the message into header and remainder.
+	header, _, _ := strings.Cut(msg, "\n")
+	// Check for the breaking-change marker: a "!" immediately before the
+	// ": " separator (e.g. "feat!: x" or "feat(api)!: x"). This ignores
+	// exclamation marks elsewhere in the description.
+	if i := strings.Index(header, ": "); strings.HasSuffix(header[:max(i, 0)], "!") {
+		return true
 	}
-	// Return no error to indicate success.
-	return nil
-}
-
-// gitErr enriches a git command error with the command's stderr output, which
-// carries git's diagnostic text (e.g. "not a git repository"). The original
-// error is wrapped, so errors.Is and errors.As still reach it.
-func gitErr(err error, stderr string) error {
-	// If git wrote no diagnostic, return the error unchanged.
-	if stderr == "" {
-		return err
-	}
-	// Otherwise, append the diagnostic text to the error.
-	return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr))
-}
-
-// stagedDiff returns the staged diff, truncated to the first maxLen
-// characters when it is longer, with a truncation marker appended.
-// Truncation counts characters (runes), matching the display-length
-// convention used by validateMessage. It returns an error if nothing is
-// staged or if maxLen is negative.
-func stagedDiff(ctx context.Context, maxLen int) (string, error) {
-	// If maxLen is negative, return an error.
-	if maxLen < 0 {
-		return "", tserr.Higher(&tserr.HigherArgs{Var: "maxLen", Actual: int64(maxLen), LowerBound: 0})
-	}
-	// Capture the diff from git using the flags --staged and -W. stderr is
-	// discarded: runGit attaches any diagnostic text to the returned error.
-	var outDiff bytes.Buffer
-	// Run git diff against the staging area with full function context.
-	if err := runGit(ctx, &outDiff, io.Discard, "diff", "--staged", "-W"); err != nil {
-		return "", tserr.Op(&tserr.OpArgs{Op: "diff", Fn: "git", Err: err})
-	}
-	// If the diff is empty, return an empty string and an error.
-	if outDiff.Len() == 0 {
-		return "", tserr.Empty("git staged changes")
-	}
-	// Truncate the diff to maxLen characters, counting runes rather than
-	// bytes so multi-byte text is measured as a reader counts it and the
-	// cut never splits a character.
-	diff := outDiff.String()
-	// If the diff exceeds maxLen characters, cut at the character boundary
-	// and append the truncation marker.
-	if r := []rune(diff); len(r) > maxLen {
-		diff = string(r[:maxLen]) + "\n... (truncated)"
-	}
-	// Return the diff and no error to indicate success.
-	return diff, nil
-}
-
-// commit creates a git commit with the message msg.
-func commit(ctx context.Context, msg string) error {
-	// Create a new git commit with the given message msg, streaming output to
-	// os.Stdout and os.Stderr.
-	if err := runGit(ctx, os.Stdout, os.Stderr, "commit", "-m", msg); err != nil {
-		// If an error occurs, return an error.
-		return tserr.Op(&tserr.OpArgs{Op: "commit", Fn: "git", Err: err})
-	}
-	// Return no error to indicate success.
-	return nil
+	// Otherwise check for a "BREAKING CHANGE:" footer line.
+	return breakingFooterRe.MatchString(msg)
 }

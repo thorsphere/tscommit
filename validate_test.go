@@ -6,7 +6,7 @@ package tscommit_test
 
 // Imports for testing.
 import (
-	"fmt"     // Import the fmt package for formatting.
+	// Import the fmt package for formatting.
 	"strings" // Import the strings package for string handling.
 	"testing" // Import the testing package for testing.
 
@@ -82,33 +82,6 @@ func TestValidateMessageInvalid(t *testing.T) {
 		// if validateMessage returns nil, the test fails
 		if err := tscommit.ValidateMessage(tc.msg); err == nil {
 			t.Error(tserr.NilFailed("validateMessage"))
-		}
-	}
-}
-
-// TestHasBreakingChange tests the HasBreakingChange function with valid messages
-// It checks that the function returns the expected value for each message in the slice
-func TestHasBreakingChange(t *testing.T) {
-	cases := []struct {
-		name string
-		msg  string
-		want bool
-	}{
-		{"scoped header marker", "feat(api)!: remove legacy config keys", true},
-		{"plain header marker", "chore(x)!: drop Go 1.20 support", true},
-		{"footer", "feat(x): x\n\nBREAKING CHANGE: config keys renamed", true},
-		{"no marker", "fix(x): handle empty diff", false},
-		{"exclamation in description", "feat(x): support wow!", false},
-		{"footer text mid-prose", "feat(x): x\n\nWe avoided BREAKING CHANGE: here", false},
-		{"hyphen footer", "feat(x): x\n\nBREAKING-CHANGE: renamed", true},
-		{"empty footer", "feat(x): x\n\nBREAKING CHANGE:", true},
-		{"marker in description", "feat(x): document the !: marker", false},
-	}
-	// for each test case in the slice, call the function
-	for _, tc := range cases {
-		// if HasBreakingChange returns the expected value, the test passes
-		if got := tscommit.HasBreakingChange(tc.msg); got != tc.want {
-			t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "HasBreakingChange", Actual: fmt.Sprintf("%v", got), Want: fmt.Sprintf("%v", tc.want)}))
 		}
 	}
 }

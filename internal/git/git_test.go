@@ -2,7 +2,7 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
-package tscommit_test
+package git_test
 
 // Imports for testing.
 import (
@@ -14,8 +14,8 @@ import (
 	"strings" // Import the strings package for string handling.
 	"testing" // Import the testing package for testing.
 
-	"github.com/thorsphere/tscommit" // Import the tscommit package for testing.
-	"github.com/thorsphere/tserr"    // Import the tserr package for error handling.
+	"github.com/thorsphere/tscommit/internal/git" // Import the git package under test.
+	"github.com/thorsphere/tserr"                 // Import the tserr package for error handling.
 )
 
 // fakeGit implements the git execution seam without a git binary.
@@ -58,7 +58,7 @@ func useFakeGit(t *testing.T, f *fakeGit) {
 	// Swap the git seam for the duration of the test.
 	// Register the returned function as a test cleanup function to
 	// undo the swap.
-	t.Cleanup(tscommit.SetExecGit(f.run))
+	t.Cleanup(git.SetExecGit(f.run))
 }
 
 // wantGitArgs fails the test unless git was invoked exactly once with want.
@@ -76,6 +76,8 @@ func wantGitArgs(t *testing.T, got [][]string, want []string) {
 func TestStagedDiff(t *testing.T) {
 	// Define a long string.
 	long := strings.Repeat("x", 100)
+	// The staged diff size limit.
+	maxDiffChars := 30000
 	// Define the test cases.
 	cases := []struct {
 		name           string
@@ -88,7 +90,7 @@ func TestStagedDiff(t *testing.T) {
 		wantErrText    string
 		wantNoGitCalls bool // When set, git must not be invoked at all.
 	}{
-		{"passthrough", "diff --git a/x b/x\n", "", nil, tscommit.MaxDiffChars, "diff --git a/x b/x\n", false, "", false},
+		{"passthrough", "diff --git a/x b/x\n", "", nil, maxDiffChars, "diff --git a/x b/x\n", false, "", false},
 		{"exact fit", "12345", "", nil, 5, "12345", false, "", false},
 		{"truncated", long, "", nil, 40, long[:40] + "\n... (truncated)", false, "", false},
 		// Truncation counts characters: 3 runes fit exactly in 3.
@@ -99,10 +101,10 @@ func TestStagedDiff(t *testing.T) {
 		{"negative maxLen", "", "", nil, -1, "", true, "maxLen", true},
 		// A zero maxLen truncates to just the marker; the diff is non-empty.
 		{"zero maxLen", "x", "", nil, 0, "\n... (truncated)", false, "", false},
-		{"empty staged", "", "", nil, tscommit.MaxDiffChars, "", true, "", false},
-		{"command failure", "", "", errors.New("exit status 128"), tscommit.MaxDiffChars, "", true, "", false},
+		{"empty staged", "", "", nil, maxDiffChars, "", true, "", false},
+		{"command failure", "", "", errors.New("exit status 128"), maxDiffChars, "", true, "", false},
 		// git's diagnostic text must survive into the wrapped error.
-		{"failure with stderr", "", "fatal: not a git repository\n", errors.New("exit status 128"), tscommit.MaxDiffChars, "", true, "fatal: not a git repository", false},
+		{"failure with stderr", "", "fatal: not a git repository\n", errors.New("exit status 128"), maxDiffChars, "", true, "fatal: not a git repository", false},
 	}
 	// Run the tests.
 	for _, tc := range cases {
@@ -113,7 +115,7 @@ func TestStagedDiff(t *testing.T) {
 			// Swap the git seam for the duration of the test.
 			useFakeGit(t, fake)
 			// Run the staged diff.
-			got, err := tscommit.StagedDiff(context.Background(), tc.maxLen)
+			got, err := git.StagedDiff(context.Background(), tc.maxLen)
 			// if the error state doesn't match, the test fails
 			if (err != nil) != tc.wantErr {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "StagedDiff error", Actual: fmt.Sprintf("%v", err != nil), Want: fmt.Sprintf("%v", tc.wantErr)}))
@@ -162,7 +164,7 @@ func TestCommit(t *testing.T) {
 			// Swap the git seam for the duration of the test.
 			useFakeGit(t, fake)
 			// Run the commit.
-			err := tscommit.Commit(context.Background(), tc.msg)
+			err := git.Commit(context.Background(), tc.msg)
 			// if the error state doesn't match, the test fails
 			if (err != nil) != tc.wantErr {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Commit error", Actual: fmt.Sprintf("%v", err != nil), Want: fmt.Sprintf("%v", tc.wantErr)}))

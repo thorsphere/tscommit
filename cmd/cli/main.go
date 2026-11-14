@@ -2,6 +2,12 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
+// Package main is the entry point for the tscommit CLI helper, an
+// interactive command-line tool that generates conventional git commit
+// messages from the staged diff via a configured AI provider and creates
+// the commit after user review. It reads its configuration, including the
+// OPENROUTER_API_KEY required to call the AI provider, exclusively from
+// environment variables, binds no port, and persists no local state.
 package main
 
 // Import packages
@@ -11,9 +17,9 @@ import (
 	"os/signal" // Import the os/signal package for signal handling.
 	"syscall"   // Import the syscall package for signal constants.
 
-	"github.com/thorsphere/tscommit" // Import the tscommit package for commit message generation.
-	"github.com/thorsphere/tserr"    // Import the tserr package for error reporting.
-	"github.com/thorsphere/tslog"    // Import the tslog package for logging.
+	"github.com/thorsphere/tscommit/internal/cli" // Import the internal cli package for the tscommit workflow.
+	"github.com/thorsphere/tserr"                 // Import the tserr package for error reporting.
+	"github.com/thorsphere/tslog"                 // Import the tslog package for logging.
 )
 
 // main is the entry point for the tscommit command-line tool.
@@ -35,7 +41,7 @@ func main() {
 	// Ensure that the context is canceled when the program exits.
 	defer stop()
 	// Run the tscommit workflow with context cancellation support.
-	if err := tscommit.RunContext(ctx); err != nil {
+	if err := cli.RunContext(ctx); err != nil {
 		// Log the error and exit with a non-zero status code.
 		tslog.Error(err)
 		// Exit with a non-zero status code to indicate failure.

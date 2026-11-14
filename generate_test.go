@@ -16,6 +16,25 @@ import (
 	"github.com/thorsphere/tserr"    // Import the tserr package for error reporting.
 )
 
+// sessionIDFrom extracts the session ID from a request rendering recorded
+// by fakeChat (fmt.Sprintf("%+v", req)); the sessionID field is the last
+// field before the closing brace of the struct.
+func sessionIDFrom(t *testing.T, rendered string) string {
+	// Mark the test function as test helper function.
+	t.Helper()
+	// Locate the sessionID field in the rendering.
+	i := strings.LastIndex(rendered, "sessionID:")
+	// If the field is missing, fail the test.
+	if i < 0 {
+		t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "request rendering", Actual: rendered, Want: "a rendering carrying a sessionID field"}))
+		return ""
+	}
+	// Extract the field value up to the closing brace of the struct.
+	value, _, _ := strings.Cut(rendered[i+len("sessionID:"):], "}")
+	// Return the extracted session ID.
+	return value
+}
+
 // TestNewGenerator tests NewGenerator across valid and invalid provider/API-key
 // environment configurations. It uses t.Setenv and must not call t.Parallel.
 func TestNewGenerator(t *testing.T) {
@@ -202,10 +221,6 @@ func TestGeneratorGenerate(t *testing.T) {
 			fake := &fakeChat{script: tc.script}
 			// Install the fake AI completion seam for the subtest.
 			useFakeChat(t, fake)
-			// Swap git and editor seams to fail loudly if Generate ever invokes them.
-			git := &fakeRunGit{}
-			// Install the fake git execution seam for the subtest.
-			t.Cleanup(tscommit.SetExecGit(git.run))
 			// Prepare the generator instance according to the scenario.
 			var gen *tscommit.Generator
 			switch {
@@ -284,10 +299,6 @@ func TestGeneratorGenerate(t *testing.T) {
 			// Verify the provider call count.
 			if fake.calls != tc.wantCalls {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "completeChat calls", Actual: fmt.Sprintf("%d", fake.calls), Want: fmt.Sprintf("%d", tc.wantCalls)}))
-			}
-			// Verify that Generate never touched git.
-			if len(git.args) != 0 {
-				t.Errorf("git calls = %v, want none", git.args)
 			}
 			// Verify sticky session ID reuse across all recorded requests.
 			if tc.wantSticky && len(fake.reqs) > 0 {

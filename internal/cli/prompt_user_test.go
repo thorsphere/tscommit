@@ -2,7 +2,7 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
-package tscommit_test
+package cli_test
 
 // Imports for testing.
 import (
@@ -13,9 +13,9 @@ import (
 	"strings" // Import the strings package for string manipulation.
 	"testing" // Import the testing package for table-driven tests.
 
-	"github.com/thorsphere/lpcli"    // Import the lpcli package for interactive prompting.
-	"github.com/thorsphere/tscommit" // Import the tscommit package under test.
-	"github.com/thorsphere/tserr"    // Import the tserr package for error reporting.
+	"github.com/thorsphere/lpcli"                 // Import the lpcli package for interactive prompting.
+	"github.com/thorsphere/tscommit/internal/cli" // Import the cli package under test.
+	"github.com/thorsphere/tserr"                 // Import the tserr package for error reporting.
 )
 
 // TestPromptUserSelects tests that promptUser maps each typed key and alias
@@ -29,25 +29,25 @@ func TestPromptUserSelects(t *testing.T) {
 		want      string // The expected choice value.
 		wantRetry bool   // Whether the output must show a retry message.
 	}{
-		{"default key", "y\n", tscommit.ChoiceAccept, false},
-		{"default alias", "yes\n", tscommit.ChoiceAccept, false},
-		{"enter selects default", "\n", tscommit.ChoiceAccept, false},
-		{"edit key", "e\n", tscommit.ChoiceEdit, false},
-		{"edit alias", "edit\n", tscommit.ChoiceEdit, false},
-		{"regenerate key", "r\n", tscommit.ChoiceRegenerate, false},
-		{"regenerate alias", "regen\n", tscommit.ChoiceRegenerate, false},
-		{"cancel key", "n\n", tscommit.ChoiceCancel, false},
-		{"cancel alias", "q\n", tscommit.ChoiceCancel, false},
+		{"default key", "y\n", cli.ChoiceAccept, false},
+		{"default alias", "yes\n", cli.ChoiceAccept, false},
+		{"enter selects default", "\n", cli.ChoiceAccept, false},
+		{"edit key", "e\n", cli.ChoiceEdit, false},
+		{"edit alias", "edit\n", cli.ChoiceEdit, false},
+		{"regenerate key", "r\n", cli.ChoiceRegenerate, false},
+		{"regenerate alias", "regen\n", cli.ChoiceRegenerate, false},
+		{"cancel key", "n\n", cli.ChoiceCancel, false},
+		{"cancel alias", "q\n", cli.ChoiceCancel, false},
 		// Matching is case-insensitive.
-		{"uppercase key", "E\n", tscommit.ChoiceEdit, false},
+		{"uppercase key", "E\n", cli.ChoiceEdit, false},
 		// Unknown input is rejected and the prompt is asked again.
-		{"unknown key retries", "x\ny\n", tscommit.ChoiceAccept, true},
+		{"unknown key retries", "x\ny\n", cli.ChoiceAccept, true},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create the prompter with canned input and captured output.
-			p := tscommit.NewPrompter()
+			p := cli.NewPrompter()
 			// Capture the prompter output.
 			var buf bytes.Buffer
 			// Route the prompter output into the buffer. If that fails, fail
@@ -63,7 +63,7 @@ func TestPromptUserSelects(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			got, err := tscommit.PromptUser(context.Background(), p, "feat(x): xyz", 0.92, true)
+			got, err := cli.PromptUser(context.Background(), p, "feat(x): xyz", 0.92, true)
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -100,15 +100,15 @@ func TestPromptUserWarns(t *testing.T) {
 		msg  string
 		want string // The expected warning text; empty when no warning is expected.
 	}{
-		{"bang marker warns", "feat!: drop the v1 api", tscommit.BreakingWarning},
-		{"footer warns", "feat: rework storage\n\nBREAKING CHANGE: the layout changed", tscommit.BreakingWarning},
+		{"bang marker warns", "feat!: drop the v1 api", cli.BreakingWarning},
+		{"footer warns", "feat: rework storage\n\nBREAKING CHANGE: the layout changed", cli.BreakingWarning},
 		{"plain message silent", "feat: add the thing", ""},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create the prompter with canned input and captured output.
-			p := tscommit.NewPrompter()
+			p := cli.NewPrompter()
 			// Capture the prompter output.
 			var buf bytes.Buffer
 			// Route the prompter output into the buffer. If that fails, fail
@@ -124,7 +124,7 @@ func TestPromptUserWarns(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			_, err := tscommit.PromptUser(context.Background(), p, tc.msg, 0.85, true)
+			_, err := cli.PromptUser(context.Background(), p, tc.msg, 0.85, true)
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -194,7 +194,7 @@ func TestPromptUserErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create the prompter with canned input and captured output.
-			p := tscommit.NewPrompter()
+			p := cli.NewPrompter()
 			// Capture the prompter output.
 			var buf bytes.Buffer
 			// Route the prompter output into the buffer. If that fails, fail
@@ -210,7 +210,7 @@ func TestPromptUserErrors(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			got, err := tscommit.PromptUser(tc.ctx, p, "feat(x): xyz", 0.9, true)
+			got, err := cli.PromptUser(tc.ctx, p, "feat(x): xyz", 0.9, true)
 			// If no error was returned, fail the test.
 			if err == nil {
 				t.Error(tserr.NilFailed("promptUser"))
@@ -243,7 +243,7 @@ func TestPromptUserConfidence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create the prompter with canned input and captured output.
-			p := tscommit.NewPrompter()
+			p := cli.NewPrompter()
 			// Capture the prompter output.
 			var buf bytes.Buffer
 			// Route the prompter output into the buffer.
@@ -259,7 +259,7 @@ func TestPromptUserConfidence(t *testing.T) {
 			// Call promptUser with a breaking message to verify layout order.
 			msg := "feat(api)!: drop v1"
 			// Execute promptUser under test.
-			if _, err := tscommit.PromptUser(context.Background(), p, msg, tc.confidence, tc.showConfidence); err != nil {
+			if _, err := cli.PromptUser(context.Background(), p, msg, tc.confidence, tc.showConfidence); err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
 				return
 			}
@@ -280,7 +280,7 @@ func TestPromptUserConfidence(t *testing.T) {
 			// Locate message, confidence line, and warning in the output.
 			mi := strings.Index(got, msg)
 			ci := strings.Index(got, tc.wantLine)
-			wi := strings.Index(got, tscommit.BreakingWarning)
+			wi := strings.Index(got, cli.BreakingWarning)
 			// Fail when the expected confidence line is missing.
 			if ci < 0 {
 				t.Error(tserr.NotFound(fmt.Sprintf("confidence line %q in promptUser output %q", tc.wantLine, got)))
@@ -302,7 +302,7 @@ func TestPromptUserConfidence(t *testing.T) {
 // tool name shown to the user in prompts and error messages.
 func TestNewPrompter(t *testing.T) {
 	// Create the prompter.
-	p := tscommit.NewPrompter()
+	p := cli.NewPrompter()
 	// If the prompter is nil, fail the test.
 	if p == nil {
 		t.Error(tserr.NilFailed("newPrompter"))
@@ -323,10 +323,10 @@ func TestWarnBreakingChange(t *testing.T) {
 		msg  string
 		want string // The expected prompter output; empty when no warning.
 	}{
-		{"bang marker", "feat!: drop the v1 api", tscommit.BreakingWarning},
-		{"bang marker with scope", "feat(api)!: remove the legacy field", tscommit.BreakingWarning},
-		{"breaking change footer", "feat: rework storage\n\nBREAKING CHANGE: the layout changed", tscommit.BreakingWarning},
-		{"breaking-change footer", "feat: rework storage\n\nBREAKING-CHANGE: the layout changed", tscommit.BreakingWarning},
+		{"bang marker", "feat!: drop the v1 api", cli.BreakingWarning},
+		{"bang marker with scope", "feat(api)!: remove the legacy field", cli.BreakingWarning},
+		{"breaking change footer", "feat: rework storage\n\nBREAKING CHANGE: the layout changed", cli.BreakingWarning},
+		{"breaking-change footer", "feat: rework storage\n\nBREAKING-CHANGE: the layout changed", cli.BreakingWarning},
 		{"plain message silent", "feat: add the thing", ""},
 		// An exclamation mark in the description is not a marker.
 		{"exclamation in description silent", "feat: wow! neat", ""},
@@ -345,7 +345,7 @@ func TestWarnBreakingChange(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			tscommit.WarnBreakingChange(p, tc.msg)
+			cli.WarnBreakingChange(p, tc.msg)
 			// If the output differs from the expectation, fail the test.
 			if got := buf.String(); got != tc.want {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "warnBreakingChange output", Actual: got, Want: tc.want}))
@@ -380,7 +380,7 @@ func TestEditInEditor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Swap the editor seam and restore it after the test.
-			t.Cleanup(tscommit.SetEditMessage(func(ctx context.Context, p *lpcli.Prompter, initialText string) (string, error) {
+			t.Cleanup(cli.SetEditMessage(func(ctx context.Context, p *lpcli.Prompter, initialText string) (string, error) {
 				// The initial text must reach the editor verbatim.
 				if initialText != initial {
 					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "initialText", Actual: initialText, Want: initial}))
@@ -389,7 +389,7 @@ func TestEditInEditor(t *testing.T) {
 				return tc.edited, tc.editErr
 			}))
 			// Call the function under test.
-			got, err := tscommit.EditInEditor(context.Background(), lpcli.NewPrompter("tscommit"), initial)
+			got, err := cli.EditInEditor(context.Background(), lpcli.NewPrompter("tscommit"), initial)
 			// Check the error expectation and the returned message.
 			if tc.wantErr {
 				// An error is expected: fail if it is missing or a value leaked.
@@ -436,7 +436,7 @@ func TestCheckEditedValid(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Call the function under test.
-			got, err := tscommit.CheckEdited(tc.edited)
+			got, err := cli.CheckEdited(tc.edited)
 			// If the function returns an error, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "checkEdited", Err: err}))
@@ -469,7 +469,7 @@ func TestCheckEditedInvalid(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Call the function under test.
-			got, err := tscommit.CheckEdited(tc.edited)
+			got, err := cli.CheckEdited(tc.edited)
 			// If the function returns no error, fail the test.
 			if err == nil {
 				t.Error(tserr.NilFailed("checkEdited"))

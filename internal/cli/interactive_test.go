@@ -2,7 +2,7 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
-package tscommit_test
+package cli_test
 
 // Imports for testing.
 import (
@@ -15,9 +15,10 @@ import (
 	"strings" // Import the strings package for string containment checks.
 	"testing" // Import the testing package for unit tests.
 
-	"github.com/thorsphere/lpcli"    // Import the lpcli package for command-line interface testing.
-	"github.com/thorsphere/tscommit" // Import the tscommit package under test.
-	"github.com/thorsphere/tserr"    // Import the tserr package for error reporting.
+	"github.com/thorsphere/lpcli"                 // Import the lpcli package for command-line interface testing.
+	"github.com/thorsphere/tscommit"              // Import the tscommit package for message and generator types.
+	"github.com/thorsphere/tscommit/internal/cli" // Import the cli package under test.
+	"github.com/thorsphere/tserr"                 // Import the tserr package for error reporting.
 )
 
 // TestAbortOr tests that abortOr normalizes user aborts to tserr.Aborted and
@@ -43,7 +44,7 @@ func TestAbortOr(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Call the function under test.
-			got := tscommit.AbortOr(tc.ctx, tc.err)
+			got := cli.AbortOr(tc.ctx, tc.err)
 			// Compare the resulting error message.
 			if !strings.Contains(got.Error(), tc.want) {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "abortOr", Actual: got.Error(), Want: tc.want}))
@@ -52,42 +53,31 @@ func TestAbortOr(t *testing.T) {
 	}
 }
 
-// fakeRunGit implements the git execution seam for whole-run tests: it
-// records every invocation, serves a canned staged diff for diff calls,
-// and replays canned failures per subcommand.
-type fakeRunGit struct {
-	args      [][]string // The recorded git argument lists, in call order.
-	diffOut   string     // The canned staged diff served to diff calls.
-	diffErr   error      // The canned failure returned by diff calls.
-	commitErr error      // The canned failure returned by commit calls.
+// fakeGit implements the git seams for whole-run tests: it records every
+// invocation, serves a canned staged diff for diff calls, and replays canned
+// failures per operation.
+type fakeGit struct {
+	maxLens   []int    // The recorded diff bounds, in call order.
+	diffOut   string   // The canned staged diff served to diff calls.
+	diffErr   error    // The canned failure returned by diff calls.
+	commits   []string // The recorded commit messages, in call order.
+	commitErr error    // The canned failure returned by commit calls.
 }
 
-// run records the arguments and dispatches on the git subcommand.
-func (f *fakeRunGit) run(_ context.Context, stdout, _ io.Writer, args ...string) error {
-	// Check that the argument list is not empty; git always has a subcommand.
-	if len(args) == 0 {
-		// Reject empty argument lists.
-		return tserr.Empty("git arguments")
-	}
-	// Record the argument list for later assertions.
-	f.args = append(f.args, append([]string(nil), args...))
-	// Dispatch on the subcommand, carried by the first argument.
-	switch args[0] {
-	case "diff":
-		// Serve the canned staged diff.
-		if _, err := io.WriteString(stdout, f.diffOut); err != nil {
-			// Return the write failure.
-			return tserr.Op(&tserr.OpArgs{Op: "write diff", Fn: "fakeRunGit", Err: err})
-		}
-		// Return the canned diff failure, if any.
-		return f.diffErr
-	case "commit":
-		// Return the canned commit failure, if any.
-		return f.commitErr
-	}
-	// Reject unexpected subcommands so new call sites fail loudly.
-	return tserr.MethodNotAllowed(&tserr.MethodNotAllowedArgs{Method: args[0], Resource: "fakeRunGit"})
+// stagedDiff records the bound and serves the canned staged diff and failure.
+func (f *fakeGit) stagedDiff(_ context.Context, maxLen int) (string, error) {
+	// Record the diff bound for later assertions.
+	f.maxLens = append(f.maxLens, maxLen)
+	// Return the canned staged diff and failure.
+	return f.diffOut, f.diffErr
+}
 
+// commit records the message and returns the canned commit failure.
+func (f *fakeGit) commit(_ context.Context, msg string) error {
+	// Record the commit message for later assertions.
+	f.commits = append(f.commits, msg)
+	// Return the canned commit failure, if any.
+	return f.commitErr
 }
 
 // useStdio swaps the process standard streams for the duration of the
@@ -153,49 +143,71 @@ func useStdio(t *testing.T, input string) func() string {
 	}
 }
 
-// sessionIDFrom extracts the session ID from a request rendering recorded
-// by fakeChat (fmt.Sprintf("%+v", req)); the sessionID field is the last
-// field before the closing brace of the struct.
-func sessionIDFrom(t *testing.T, rendered string) string {
-	// Mark the test function as test helper function.
-	t.Helper()
-	// Locate the sessionID field in the rendering.
-	i := strings.LastIndex(rendered, "sessionID:")
-	// If the field is missing, fail the test.
-	if i < 0 {
-		t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "request rendering", Actual: rendered, Want: "a rendering carrying a sessionID field"}))
-		return ""
-	}
-	// Extract the field value up to the closing brace of the struct.
-	value, _, _ := strings.Cut(rendered[i+len("sessionID:"):], "}")
-	// Return the extracted session ID.
-	return value
+// genTurn is one scripted generation outcome: a canned message and error.
+type genTurn struct {
+	msg tscommit.Message // The canned message for this call.
+	err error            // The canned error for this call.
 }
 
-// wantGitCalls fails the test unless git was invoked exactly with want,
-// one argument list per call, in order.
-func wantGitCalls(t *testing.T, got, want [][]string) {
+// okGen returns a scripted genTurn carrying text and confidence.
+func okGen(text string, confidence float64) genTurn {
+	// Wrap the text and confidence in a canned message.
+	return genTurn{msg: tscommit.Message{Text: text, Confidence: confidence}}
+}
+
+// fakeGenerate implements the generateMessage seam without a provider. It
+// records every diff and replays scripted turns in order.
+type fakeGenerate struct {
+	calls  int       // The number of times the seam was invoked.
+	diffs  []string  // The recorded diffs, one per call.
+	script []genTurn // The canned turns replayed in order.
+}
+
+// run records the diff and replays the next scripted turn.
+func (f *fakeGenerate) run(_ context.Context, _ *tscommit.Generator, diff string) (tscommit.Message, error) {
+	// Record the diff so the generation input can be asserted.
+	f.diffs = append(f.diffs, diff)
+	// Count the invocation.
+	f.calls++
+	// Return an error when the script is exhausted; the call-count
+	// assertion reports the over-invocation.
+	if f.calls > len(f.script) {
+		// Return an error for the unexpected extra call.
+		return tscommit.Message{}, errors.New("fakeGenerate: script exhausted")
+	}
+	// Replay the next scripted turn.
+	turn := f.script[f.calls-1]
+	// Return the canned message and error.
+	return turn.msg, turn.err
+}
+
+// wantGitCalls fails the test unless the git seams were invoked as wanted:
+// wantDiff staged diff reads bounded to cli.MaxDiffChars and wantCommits
+// committed messages, in order.
+func wantGitCalls(t *testing.T, f *fakeGit, wantDiff int, wantCommits []string) {
 	// Mark the test function as test helper function.
 	t.Helper()
-	// If the call counts differ, fail the test.
-	if len(got) != len(want) {
-		t.Errorf("git calls = %v, want %v", got, want)
-		return
+	// If the staged diff read count differs, fail the test.
+	if len(f.maxLens) != wantDiff {
+		t.Errorf("stagedDiff calls = %v, want %v", len(f.maxLens), wantDiff)
 	}
-	// Compare every recorded call against the expectation.
-	for i := range want {
-		// If one call differs, fail the test.
-		if !slices.Equal(got[i], want[i]) {
-			t.Errorf("git args = %v, want %v", got, want)
-			return
+	// Every staged diff read must use the CLI diff bound.
+	for _, maxLen := range f.maxLens {
+		// If a read used a different bound, fail the test.
+		if maxLen != cli.MaxDiffChars {
+			t.Errorf("stagedDiff maxLen = %v, want %v", maxLen, cli.MaxDiffChars)
 		}
+	}
+	// If the committed messages differ from the expectation, fail the test.
+	if !slices.Equal(f.commits, wantCommits) {
+		t.Errorf("commits = %v, want %v", f.commits, wantCommits)
 	}
 }
 
 // TestRunContext tests the full workflow end to end: client construction,
 // staged diff reading, message generation, the interactive accept / edit /
-// regenerate / cancel loop, and commit creation. The git, AI and editor
-// seams are swapped and the process streams carry canned input and a
+// regenerate / cancel loop, and commit creation. The git, generation and
+// editor seams are swapped and the process streams carry canned input and a
 // capture file, so no external binary, network call, or terminal is
 // required. It must not use t.Parallel.
 func TestRunContext(t *testing.T) {
@@ -215,44 +227,47 @@ func TestRunContext(t *testing.T) {
 	genErr := errors.New("provider boom")
 	// Test cases.
 	cases := []struct {
-		name         string     // The scenario name.
-		key          string     // The OPENROUTER_API_KEY value installed for the run.
-		input        string     // The canned prompter input (keystrokes, newline-terminated).
-		diffOut      string     // The canned staged diff served by git.
-		diffErr      error      // The canned staged diff failure.
-		chat         []chatTurn // The scripted provider turns.
-		editOut      string     // The content the fake editor returns.
-		editErr      error      // The error the fake editor returns.
-		commitErr    error      // The canned commit failure.
-		choices      []string   // Optional canned choice values returned by the selectChoice seam.
-		cancelled    bool       // Whether the context is cancelled before the run.
-		wantErr      bool       // Whether an error is expected.
-		wantErrText  string     // Text the error must contain.
-		wantGit      [][]string // The expected git argument lists, in call order.
-		wantCalls    int        // The expected number of provider calls.
-		wantEditText string     // The text the editor must receive; empty when the editor must not run.
-		wantSticky   bool       // Whether all provider calls must share one session ID.
-		wantWarn     bool       // Whether the breaking-change warning must be printed.
-		wantConfCnt  int        // The expected number of "Confidence:" lines; -1 skips the check.
-		wantOutText  string     // Optional text that must appear in the captured output.
+		name         string    // The scenario name.
+		key          string    // The OPENROUTER_API_KEY value installed for the run.
+		input        string    // The canned prompter input (keystrokes, newline-terminated).
+		diffOut      string    // The canned staged diff served by the git diff seam.
+		diffErr      error     // The canned staged diff failure.
+		script       []genTurn // The scripted generation turns.
+		editOut      string    // The content the fake editor returns.
+		editErr      error     // The error the fake editor returns.
+		commitErr    error     // The canned commit failure.
+		choices      []string  // Optional canned choice values returned by the selectChoice seam.
+		cancelled    bool      // Whether the context is cancelled before the run.
+		wantErr      bool      // Whether an error is expected.
+		wantErrText  string    // Text the error must contain.
+		wantDiff     int       // The expected number of staged diff reads.
+		wantCommits  []string  // The expected committed messages, in order.
+		wantCalls    int       // The expected number of generation calls.
+		wantEditText string    // The text the editor must receive; empty when the editor must not run.
+		wantWarn     bool      // Whether the breaking-change warning must be printed.
+		wantConfCnt  int       // The expected number of "Confidence:" lines; -1 skips the check.
+		wantOutText  string    // Optional text that must appear in the captured output.
 	}{
 		{
 			name:        "accept commits the generated message",
 			key:         testKey,
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			script:      []genTurn{okGen(firstMsg, 0.91)},
+			wantDiff:    1,
+			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
 			input:       "y\n",
 		},
 		{
-			name:        "large staged diff is truncated at CLI boundary before generation",
-			key:         testKey,
-			input:       "y\n",
-			diffOut:     strings.Repeat("d", tscommit.MaxDiffChars+50),
-			chat:        []chatTurn{okTurn(firstMsg, 0.62)},
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			name:  "truncated staged diff is passed to generation unchanged",
+			key:   testKey,
+			input: "y\n",
+			// The canned staged diff as git.StagedDiff returns it when oversized.
+			diffOut:     strings.Repeat("d", cli.MaxDiffChars) + "\n... (truncated)",
+			script:      []genTurn{okGen(firstMsg, 0.62)},
+			wantDiff:    1,
+			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
@@ -261,8 +276,9 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			script:      []genTurn{okGen(firstMsg, 0.91)},
+			wantDiff:    1,
+			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
@@ -271,10 +287,10 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "n\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			script:      []genTurn{okGen(firstMsg, 0.91)},
 			wantErr:     true,
 			wantErrText: "commit aborted by user",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
@@ -283,10 +299,11 @@ func TestRunContext(t *testing.T) {
 			key:          testKey,
 			input:        "e\ny\n",
 			diffOut:      diff,
-			chat:         []chatTurn{okTurn(firstMsg, 0.91)},
+			script:       []genTurn{okGen(firstMsg, 0.91)},
 			editOut:      editedMsg,
 			wantEditText: firstMsg,
-			wantGit:      [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", editedMsg}},
+			wantDiff:     1,
+			wantCommits:  []string{editedMsg},
 			wantCalls:    1,
 			wantConfCnt:  1, // Shown before edit, omitted after edit.
 		},
@@ -295,10 +312,10 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "r\ny\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.75), okTurn(secondMsg, 0.94)},
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", secondMsg}},
+			script:      []genTurn{okGen(firstMsg, 0.75), okGen(secondMsg, 0.94)},
+			wantDiff:    1,
+			wantCommits: []string{secondMsg},
 			wantCalls:   2,
-			wantSticky:  true,
 			wantConfCnt: 2, // Shown on both AI-generated turns.
 		},
 		{
@@ -306,8 +323,9 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "y\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(breakingMsg, 0.88)},
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", breakingMsg}},
+			script:      []genTurn{okGen(breakingMsg, 0.88)},
+			wantDiff:    1,
+			wantCommits: []string{breakingMsg},
 			wantCalls:   1,
 			wantWarn:    true,
 			wantConfCnt: 1,
@@ -317,12 +335,12 @@ func TestRunContext(t *testing.T) {
 			key:          testKey,
 			input:        "e\n",
 			diffOut:      diff,
-			chat:         []chatTurn{okTurn(firstMsg, 0.91)},
+			script:       []genTurn{okGen(firstMsg, 0.91)},
 			editErr:      errFake, // The editor failure defined in prompt_user_test.go.
 			wantEditText: firstMsg,
 			wantErr:      true,
 			wantErrText:  "editor failed",
-			wantGit:      [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:     1,
 			wantCalls:    1,
 			wantConfCnt:  1,
 		},
@@ -331,12 +349,12 @@ func TestRunContext(t *testing.T) {
 			key:          testKey,
 			input:        "e\n",
 			diffOut:      diff,
-			chat:         []chatTurn{okTurn(firstMsg, 0.91)},
+			script:       []genTurn{okGen(firstMsg, 0.91)},
 			editOut:      " \t\n",
 			wantEditText: firstMsg,
 			wantErr:      true,
 			wantErrText:  "commit message after edit",
-			wantGit:      [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:     1,
 			wantCalls:    1,
 			wantConfCnt:  1,
 		},
@@ -344,10 +362,10 @@ func TestRunContext(t *testing.T) {
 			name:        "generation failure surfaces before prompting",
 			key:         testKey,
 			diffOut:     diff,
-			chat:        []chatTurn{{err: genErr}},
+			script:      []genTurn{{err: genErr}},
 			wantErr:     true,
 			wantErrText: "provider boom",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   1,
 			wantConfCnt: 0,
 		},
@@ -356,10 +374,10 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "r\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91), {err: genErr}},
+			script:      []genTurn{okGen(firstMsg, 0.91), {err: genErr}},
 			wantErr:     true,
 			wantErrText: "provider boom",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   2,
 			wantConfCnt: 1,
 		},
@@ -368,31 +386,32 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "y\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
-			commitErr:   errors.New("exit status 1"),
+			script:      []genTurn{okGen(firstMsg, 0.91)},
+			commitErr:   tserr.Op(&tserr.OpArgs{Op: "commit", Fn: "git", Err: errors.New("exit status 1")}), // The wrapped commit failure as git.Commit returns it.
 			wantErr:     true,
 			wantErrText: "commit git failed",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			wantDiff:    1,
+			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
 		{
 			name:        "staged diff failure surfaces",
 			key:         testKey,
-			diffErr:     errors.New("exit status 128"),
+			diffErr:     tserr.Op(&tserr.OpArgs{Op: "diff", Fn: "git", Err: errors.New("exit status 128")}), // The wrapped diff failure as git.StagedDiff returns it.
 			wantErr:     true,
 			wantErrText: "diff git failed",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   0,
 			wantConfCnt: 0,
 		},
 		{
 			name:        "nothing staged surfaces",
 			key:         testKey,
-			diffOut:     "", // An empty diff is rejected by stagedDiff.
+			diffErr:     tserr.Empty("git staged changes"), // The empty-diff failure as git.StagedDiff returns it.
 			wantErr:     true,
 			wantErrText: "git staged changes",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   0,
 			wantConfCnt: 0,
 		},
@@ -401,7 +420,7 @@ func TestRunContext(t *testing.T) {
 			key:         "",
 			wantErr:     true,
 			wantErrText: "new client",
-			wantGit:     nil, // Git must not be invoked at all.
+			wantDiff:    0, // Git must not be invoked at all.
 			wantCalls:   0,
 			wantConfCnt: 0,
 		},
@@ -410,11 +429,11 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "y\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			script:      []genTurn{okGen(firstMsg, 0.91)},
 			cancelled:   true,
 			wantErr:     true,
 			wantErrText: "commit aborted by user",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
@@ -423,10 +442,10 @@ func TestRunContext(t *testing.T) {
 			key:         testKey,
 			input:       "",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
+			script:      []genTurn{okGen(firstMsg, 0.91)},
 			wantErr:     true,
 			wantErrText: "tscommit aborted by user", // The raw prompter abort passes through abortOr.
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 			wantCalls:   1,
 			wantConfCnt: 1,
 		},
@@ -434,9 +453,10 @@ func TestRunContext(t *testing.T) {
 			name:        "unhandled choice warns and re-prompts before accepting",
 			key:         testKey,
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(firstMsg, 0.91)},
-			choices:     []string{"surprise", tscommit.ChoiceAccept},
-			wantGit:     [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", firstMsg}},
+			script:      []genTurn{okGen(firstMsg, 0.91)},
+			choices:     []string{"surprise", cli.ChoiceAccept},
+			wantDiff:    1,
+			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 2,
 			wantOutText: `Ignoring unhandled option "surprise"; please choose again.`,
@@ -448,19 +468,21 @@ func TestRunContext(t *testing.T) {
 			// Install the scenario API key; t.Setenv restores it after the subtest.
 			t.Setenv("OPENROUTER_API_KEY", tc.key)
 			// Create the fake git with the scenario's diff and failures.
-			git := &fakeRunGit{diffOut: tc.diffOut, diffErr: tc.diffErr, commitErr: tc.commitErr}
-			// Swap the git seam for the duration of the test.
-			t.Cleanup(tscommit.SetExecGit(git.run))
-			// Create the fake provider with the scripted turns.
-			fake := &fakeChat{script: tc.chat}
-			// Swap the AI seam for the duration of the test.
-			useFakeChat(t, fake)
+			git := &fakeGit{diffOut: tc.diffOut, diffErr: tc.diffErr, commitErr: tc.commitErr}
+			// Swap the git diff seam for the duration of the test.
+			t.Cleanup(cli.SetStagedDiff(git.stagedDiff))
+			// Swap the git commit seam for the duration of the test.
+			t.Cleanup(cli.SetCommit(git.commit))
+			// Create the fake generator with the scripted turns.
+			fake := &fakeGenerate{script: tc.script}
+			// Swap the generation seam for the duration of the test.
+			t.Cleanup(cli.SetGenerateMessage(fake.run))
 			// Swap the selection seam when the scenario specifies explicit choice values.
 			if len(tc.choices) > 0 {
 				// Track the current index in the scripted choice sequence.
 				choiceIdx := 0
 				// Swap selectChoice for the duration of the subtest.
-				t.Cleanup(tscommit.SetSelectChoice(func(_ context.Context, _ *lpcli.Prompter, _ lpcli.SelectOptions) (string, error) {
+				t.Cleanup(cli.SetSelectChoice(func(_ context.Context, _ *lpcli.Prompter, _ lpcli.SelectOptions) (string, error) {
 					// Return an error if the scripted choices are exhausted.
 					if choiceIdx >= len(tc.choices) {
 						return "", errors.New("selectChoice script exhausted")
@@ -476,7 +498,7 @@ func TestRunContext(t *testing.T) {
 			// Track the editor invocations and the text the editor receives.
 			editorText, editorCalls := "", 0
 			// Swap the editor seam for the duration of the test.
-			t.Cleanup(tscommit.SetEditMessage(func(_ context.Context, _ *lpcli.Prompter, initialText string) (string, error) {
+			t.Cleanup(cli.SetEditMessage(func(_ context.Context, _ *lpcli.Prompter, initialText string) (string, error) {
 				// Record the editor invocation and the received text.
 				editorCalls++
 				editorText = initialText
@@ -497,7 +519,7 @@ func TestRunContext(t *testing.T) {
 				ctx = cancelled
 			}
 			// Run the workflow under test.
-			err := tscommit.RunContext(ctx)
+			err := cli.RunContext(ctx)
 			// Check the error expectation.
 			if tc.wantErr {
 				// An error is expected: fail if it is missing.
@@ -511,11 +533,11 @@ func TestRunContext(t *testing.T) {
 				// No error is expected: fail on any error.
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "RunContext", Err: err}))
 			}
-			// Check the git invocation sequence.
-			wantGitCalls(t, git.args, tc.wantGit)
-			// Check the provider call count.
+			// Check the git seam invocation contract.
+			wantGitCalls(t, git, tc.wantDiff, tc.wantCommits)
+			// Check the generation call count.
 			if fake.calls != tc.wantCalls {
-				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "completeChat calls", Actual: fmt.Sprintf("%v", fake.calls), Want: fmt.Sprintf("%v", tc.wantCalls)}))
+				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "generateMessage calls", Actual: fmt.Sprintf("%v", fake.calls), Want: fmt.Sprintf("%v", tc.wantCalls)}))
 			}
 			// Check the editor contract.
 			if tc.wantEditText != "" {
@@ -531,22 +553,10 @@ func TestRunContext(t *testing.T) {
 				// The editor must not run when no edit is expected.
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "editMessage calls", Actual: fmt.Sprintf("%v", editorCalls), Want: "0"}))
 			}
-			// Check that regenerations reuse one sticky routing key.
-			if tc.wantSticky {
-				// Extract the session ID of the first recorded request.
-				first := sessionIDFrom(t, fake.reqs[0])
-				// Every request must carry the same session ID.
-				for _, req := range fake.reqs[1:] {
-					// If a request carries a different session ID, fail the test.
-					if id := sessionIDFrom(t, req); id != first {
-						t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "session ID", Actual: id, Want: first}))
-					}
-				}
-			}
 			// Read the captured output once for layout checks.
 			out := captured()
 			// Check the breaking-change warning against the captured output.
-			if warn := strings.Contains(out, tscommit.BreakingWarning); warn != tc.wantWarn {
+			if warn := strings.Contains(out, cli.BreakingWarning); warn != tc.wantWarn {
 				t.Errorf("breaking-change warning present = %v, want %v", warn, tc.wantWarn)
 			}
 			// Check how many times the AI confidence line was displayed.
@@ -557,12 +567,11 @@ func TestRunContext(t *testing.T) {
 			if tc.wantOutText != "" && !strings.Contains(out, tc.wantOutText) {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "captured output", Actual: out, Want: tc.wantOutText}))
 			}
-			// When the staged diff exceeded MaxDiffChars, verify the prompt sent to the
-			// AI provider carried the truncation marker rather than the raw excess.
-			if len([]rune(tc.diffOut)) > tscommit.MaxDiffChars && len(fake.reqs) > 0 {
-				// Fail if the truncation marker is absent from the first provider request.
-				if !strings.Contains(fake.reqs[0], "... (truncated)") {
-					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "provider prompt", Actual: fake.reqs[0], Want: "prompt containing ... (truncated)"}))
+			// Verify every generation call received the canned staged diff unchanged.
+			for _, d := range fake.diffs {
+				// If the generation input differs from the canned staged diff, fail the test.
+				if d != tc.diffOut {
+					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "generation input", Actual: fmt.Sprintf("%q", d), Want: fmt.Sprintf("%q", tc.diffOut)}))
 				}
 			}
 		})
@@ -577,43 +586,45 @@ func TestRunContext(t *testing.T) {
 func TestRun(t *testing.T) {
 	// The canned staged diff served to the workflow.
 	const diff = "diff --git a/login.go b/login.go\n"
-	// The message the fake provider produces.
+	// The message the fake generator produces.
 	const msg = "feat(x): add login"
 	// Test cases.
 	cases := []struct {
-		name        string     // The scenario name.
-		key         string     // The OPENROUTER_API_KEY value installed for the run.
-		input       string     // The canned prompter input (keystrokes, newline-terminated).
-		diffOut     string     // The canned staged diff served by git.
-		chat        []chatTurn // The scripted provider turns.
-		wantErr     bool       // Whether an error is expected.
-		wantErrText string     // Text the error must contain.
-		wantGit     [][]string // The expected git argument lists, in call order.
+		name        string    // The scenario name.
+		key         string    // The OPENROUTER_API_KEY value installed for the run.
+		input       string    // The canned prompter input (keystrokes, newline-terminated).
+		diffOut     string    // The canned staged diff served by the git diff seam.
+		script      []genTurn // The scripted generation turns.
+		wantErr     bool      // Whether an error is expected.
+		wantErrText string    // Text the error must contain.
+		wantDiff    int       // The expected number of staged diff reads.
+		wantCommits []string  // The expected committed messages, in order.
 	}{
 		{
-			name:    "accept commits the generated message",
-			key:     "sk-or-v1-test-key",
-			input:   "y\n",
-			diffOut: diff,
-			chat:    []chatTurn{okTurn(msg, 0.9)},
-			wantGit: [][]string{{"diff", "--staged", "-W"}, {"commit", "-m", msg}},
+			name:        "accept commits the generated message",
+			key:         "sk-or-v1-test-key",
+			input:       "y\n",
+			diffOut:     diff,
+			script:      []genTurn{okGen(msg, 0.9)},
+			wantDiff:    1,
+			wantCommits: []string{msg},
 		},
 		{
 			name:        "missing API key fails before any work",
 			key:         "",
 			wantErr:     true,
 			wantErrText: "new client",
-			wantGit:     nil, // Git must not be invoked at all.
+			wantDiff:    0, // Git must not be invoked at all.
 		},
 		{
 			name:        "cancel aborts without committing",
 			key:         "sk-or-v1-test-key",
 			input:       "n\n",
 			diffOut:     diff,
-			chat:        []chatTurn{okTurn(msg, 0.9)},
+			script:      []genTurn{okGen(msg, 0.9)},
 			wantErr:     true,
 			wantErrText: "commit aborted by user",
-			wantGit:     [][]string{{"diff", "--staged", "-W"}},
+			wantDiff:    1,
 		},
 	}
 	// Run the test cases.
@@ -622,17 +633,19 @@ func TestRun(t *testing.T) {
 			// Install the scenario API key; t.Setenv restores it after the subtest.
 			t.Setenv("OPENROUTER_API_KEY", tc.key)
 			// Create the fake git with the scenario's diff.
-			git := &fakeRunGit{diffOut: tc.diffOut}
-			// Swap the git seam for the duration of the test.
-			t.Cleanup(tscommit.SetExecGit(git.run))
-			// Create the fake provider with the scripted turns.
-			fake := &fakeChat{script: tc.chat}
-			// Swap the AI seam for the duration of the test.
-			useFakeChat(t, fake)
+			git := &fakeGit{diffOut: tc.diffOut}
+			// Swap the git diff seam for the duration of the test.
+			t.Cleanup(cli.SetStagedDiff(git.stagedDiff))
+			// Swap the git commit seam for the duration of the test.
+			t.Cleanup(cli.SetCommit(git.commit))
+			// Create the fake generator with the scripted turns.
+			fake := &fakeGenerate{script: tc.script}
+			// Swap the generation seam for the duration of the test.
+			t.Cleanup(cli.SetGenerateMessage(fake.run))
 			// Replace the process streams with canned input and a capture file.
 			useStdio(t, tc.input)
 			// Run the workflow under test.
-			err := tscommit.Run()
+			err := cli.Run()
 			// Check the error expectation.
 			if tc.wantErr {
 				// An error is expected: fail if it is missing.
@@ -646,8 +659,35 @@ func TestRun(t *testing.T) {
 				// No error is expected: fail on any error.
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "Run", Err: err}))
 			}
-			// Check the git invocation sequence.
-			wantGitCalls(t, git.args, tc.wantGit)
+			// Check the git seam invocation contract.
+			wantGitCalls(t, git, tc.wantDiff, tc.wantCommits)
 		})
+	}
+}
+
+// TestHasBreakingChange tests the HasBreakingChange function with valid messages
+// It checks that the function returns the expected value for each message in the slice
+func TestHasBreakingChange(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{"scoped header marker", "feat(api)!: remove legacy config keys", true},
+		{"plain header marker", "chore(x)!: drop Go 1.20 support", true},
+		{"footer", "feat(x): x\n\nBREAKING CHANGE: config keys renamed", true},
+		{"no marker", "fix(x): handle empty diff", false},
+		{"exclamation in description", "feat(x): support wow!", false},
+		{"footer text mid-prose", "feat(x): x\n\nWe avoided BREAKING CHANGE: here", false},
+		{"hyphen footer", "feat(x): x\n\nBREAKING-CHANGE: renamed", true},
+		{"empty footer", "feat(x): x\n\nBREAKING CHANGE:", true},
+		{"marker in description", "feat(x): document the !: marker", false},
+	}
+	// for each test case in the slice, call the function
+	for _, tc := range cases {
+		// if HasBreakingChange returns the expected value, the test passes
+		if got := cli.HasBreakingChange(tc.msg); got != tc.want {
+			t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "HasBreakingChange", Actual: fmt.Sprintf("%v", got), Want: fmt.Sprintf("%v", tc.want)}))
+		}
 	}
 }
