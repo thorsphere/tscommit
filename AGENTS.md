@@ -7,6 +7,11 @@ This repository is developed using AI-assisted engineering with strict human ove
 ## 🎯 Architecture & Intent
 - **Context:** Minimal, highly encapsulated Go package. The root package is a
   component-agnostic library; all binaries live under `cmd/`.
+- **Layout:** Component-specific logic lives in `internal/` packages; binaries
+  under `cmd/` are thin entry points. Current mapping: `cmd/api` (Cloud Run
+  service) → `internal/api` (HTTP server); `cmd/cli` (CLI helper) →
+  `internal/cli` (interactive workflow) + `internal/git` (git subprocess
+  layer). The root package stays component-agnostic.
 - **Evolution:** Packages in this organization typically end up as a Google
   Cloud Run microservice, sometimes accompanied by a CLI helper that calls
   the service over its API.
@@ -41,11 +46,17 @@ differ, and rules for one MUST NOT be applied to the other. One `main` package p
   over its HTTP API instead of talking to third-party APIs directly.
 
 **c) Shared library (root package)**
-- Must stay component-agnostic: no HTTP server wiring, no `main` imports.
+- Must stay component-agnostic: no component-specific behavior, no HTTP
+  server wiring, no interactive CLI (prompting, editor handling), no git
+  subprocess execution, and no `main` imports. HTTP wiring lives in
+  `internal/api`, the interactive workflow in `internal/cli`, and git
+  execution in `internal/git`, not in the root package.
 
 ### 2. Quality & Hardening Standards
 - **Testing:** Every new feature or package function requires table-driven Unit Tests. Target >85% coverage.
-Error-presence assertions use tserr.NilFailed/NilExpected/Empty; value mismatches use tserr.EqualStr for strings and plain t.Errorf for composite values.
+Error-presence assertions use tserr.NilFailed/NilExpected/Empty; value mismatches use tserr.EqualStr for strings and plain t.Errorf for composite values. The side-effecting seam implementations (the real process execution,
+real HTTP round-trip) are excluded from the coverage target: they are
+never run by unit tests, so their statements cannot be covered.
 - **Error Handling:** Explicit, idiomatic Go error handling. Do not panic. Wrap errors contextually where appropriate. Use the `tserr` package for error handling.
 - **Code Formatting:** Use `gofmt` to format Go code.
 - **Logging:** Service components: structured JSON logging to stdout (GCP Cloud Logging compatible) via tslog. CLI: human-readable output; tslog for diagnostics.
@@ -93,7 +104,11 @@ Error-presence assertions use tserr.NilFailed/NilExpected/Empty; value mismatche
   calls, filesystem access) through a package-level seam (a function
   variable) and swap it in tests via a `Set<Name>` helper in
   `export_test.go`. Tests that mutate a global seam must not use
-  `t.Parallel()`.
+  `t.Parallel()`. Each package seams its own external calls:
+  `export_test.go` bridges are visible only to that package's own tests,
+  so downstream tests must fake at their own seam boundary (e.g.
+  `internal/cli` swaps `generateMessage`/`stagedDiff`/`commit`, never
+  `tscommit.SetCompleteChat`).
 
 ### 4. Commands
 - Build: `go build ./...` — Test: `go test ./...` — Vet: `go vet ./...`
