@@ -8,8 +8,8 @@ This repository is developed using AI-assisted engineering with strict human ove
 - **Context:** Minimal, highly encapsulated Go package. The root package is a
   component-agnostic library; all binaries live under `cmd/`.
 - **Layout:** Component-specific logic lives in `internal/` packages; binaries
-  under `cmd/` are thin entry points. Current mapping: `cmd/api` (Cloud Run
-  service) → `internal/api` (HTTP server); `cmd/cli` (CLI helper) →
+  under `cmd/` are thin entry points. Current mapping: `cmd/srv` (Cloud Run
+  service) → `internal/srv` (HTTP server); `cmd/cli` (CLI helper) →
   `internal/cli` (interactive workflow) + `internal/git` (git subprocess
   layer). The root package stays component-agnostic.
 - **Evolution:** Packages in this organization typically end up as a Google
@@ -49,7 +49,7 @@ differ, and rules for one MUST NOT be applied to the other. One `main` package p
 - Must stay component-agnostic: no component-specific behavior, no HTTP
   server wiring, no interactive CLI (prompting, editor handling), no git
   subprocess execution, and no `main` imports. HTTP wiring lives in
-  `internal/api`, the interactive workflow in `internal/cli`, and git
+  `internal/srv`, the interactive workflow in `internal/cli`, and git
   execution in `internal/git`, not in the root package.
 
 ### 2. Quality & Hardening Standards
