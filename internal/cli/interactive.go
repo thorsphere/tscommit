@@ -30,7 +30,7 @@ const breakingWarning = "⚠ BREAKING CHANGE detected. This commit triggers a ma
 
 // maxDiffChars is the maximum staged diff length in characters (runes)
 // sent to the AI provider by the interactive CLI workflow.
-const maxDiffChars = 30000 // The staged diff size limit.
+const maxDiffChars = 100000 // The staged diff size limit.
 
 // breakingFooterRe matches a "BREAKING CHANGE:" or "BREAKING-CHANGE:" footer
 // line (anchored to the start of a line).
