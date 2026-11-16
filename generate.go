@@ -20,10 +20,10 @@ import (
 
 // Message holds a generated Conventional Commits message and its model
 // confidence score. The zero value represents an empty message with no
-// confidence.
+// confidence. It marshals to and from JSON with lowercase field names.
 type Message struct {
-	Text       string  // The generated commit message.
-	Confidence float64 // The model confidence score in [0, 1].
+	Text       string  `json:"text"`       // The generated commit message.
+	Confidence float64 `json:"confidence"` // The model confidence score in [0, 1].
 }
 
 // Generator generates Conventional Commits messages from unified diffs via a
