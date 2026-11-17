@@ -2,8 +2,9 @@
 // All Rights Reserved. Use is governed by the Functional Source License v1.1
 // (FSL-1.1-ALv2) that can be found in the LICENSE file.
 
-// Package srv implements the HTTP server handler for health probes and
-// authenticated Conventional Commits message generation from unified diffs.
+// Package srv implements the HTTP server handler and Cloud Run lifecycle for
+// health probes and authenticated Conventional Commits message generation from
+// unified diffs.
 package srv
 
 // Import packages
@@ -12,8 +13,10 @@ import (
 	"crypto/subtle" // Import the crypto/subtle package for constant-time token comparison.
 	"encoding/json" // Import the encoding/json package for JSON request decoding and response encoding.
 	"errors"        // Import the errors package for error inspection and construction.
+	"fmt"           // Import the fmt package for formatted log messages.
 	"io"            // Import the io package for EOF checks and response body writes.
 	"net/http"      // Import the net/http package for HTTP routing, middleware, and handlers.
+	"os"            // Import the os package for reading environment variables.
 	"strings"       // Import the strings package for whitespace validation.
 	"time"          // Import the time package for timeout durations.
 
@@ -36,16 +39,19 @@ type retrieveRequest struct {
 	Diff string `json:"diff"` // The unified git diff to summarize.
 }
 
-// GenerateTimeout is the per-request generation deadline, derived from
-// tscommit.MaxGenerateDuration with a grace buffer so provider timeouts
-// surface cleanly before the handler context cancels.
-const GenerateTimeout = tscommit.MaxGenerateDuration + 15*time.Second
-
-// Server endpoints and request limits.
+// Server endpoints, request limits, and Cloud Run HTTP lifecycle defaults.
 const (
-	generateEndpoint = "/commit/generate" // The endpoint for generating commit messages from diffs.
-	healthEndpoint   = "/commit/healthz"  // The liveness and readiness probe endpoint.
-	maxBodyBytes     = 128 << 10          // The maximum allowed HTTP request body size in bytes (128 KiB).
+	generateEndpoint  = "/commit/generate"                            // The endpoint for generating commit messages from diffs.
+	healthEndpoint    = "/commit/healthz"                             // The liveness and readiness probe endpoint.
+	maxBodyBytes      = 128 << 10                                     // The maximum allowed HTTP request body size in bytes (128 KiB).
+	srvPort           = "8080"                                        // The fallback port when the PORT environment variable is unset.
+	srvAddr           = ":"                                           // The host prefix that binds the server to all interfaces.
+	generateTimeout   = tscommit.MaxGenerateDuration + 15*time.Second // The per-request generation deadline with a grace buffer above MaxGenerateDuration.
+	readHeaderTimeout = 5 * time.Second                               // The maximum duration for reading request headers.
+	readTimeout       = 15 * time.Second                              // The maximum duration for reading the entire request body.
+	writeTimeout      = generateTimeout + 15*time.Second              // The socket backstop derived above the handler generation deadline.
+	idleTimeout       = 60 * time.Second                              // The maximum duration to keep idle keep-alive connections open.
+	shutdownTimeout   = 8 * time.Second                               // The deadline for draining in-flight requests after cancellation.
 )
 
 // decodeDiff returns the validated diff from the JSON body of r, enforcing the
@@ -206,6 +212,111 @@ var generateMessage = func(ctx context.Context, gen *tscommit.Generator, diff st
 	return gen.Generate(ctx, diff)
 }
 
+// listenAndServe binds srv to its configured address and serves incoming HTTP
+// requests. It is the listener seam, swapped via SetListenAndServe in
+// export_test.go so unit tests never open a real network socket.
+var listenAndServe = func(srv *http.Server) error {
+	// Delegate to the standard library HTTP server listener.
+	return srv.ListenAndServe()
+}
+
+// shutdownServer gracefully stops srv from accepting new connections and drains
+// active requests within ctx. It is the shutdown seam, swapped via
+// SetShutdownServer in export_test.go so unit tests script shutdown outcomes
+// without a network socket.
+var shutdownServer = func(ctx context.Context, srv *http.Server) error {
+	// Delegate to the standard library HTTP server graceful shutdown.
+	return srv.Shutdown(ctx)
+}
+
+// Run starts the environment-configured CommitServer and blocks until the
+// listener fails with a background context.
+func Run() error {
+	// Delegate to RunContext with a background context.
+	return RunContext(context.Background())
+}
+
+// RunContext reads PORT and API_TOKEN from the environment, constructs a
+// CommitServer, serves HTTP requests on all interfaces, and gracefully drains
+// in-flight work when ctx is canceled. It returns an error if ctx is nil,
+// API_TOKEN is unset or blank, server construction fails, the listener fails,
+// or graceful shutdown fails.
+func RunContext(ctx context.Context) error {
+	// Reject a nil context before starting any work.
+	if ctx == nil {
+		// Return an empty-context error when ctx is nil.
+		return tserr.Empty("context")
+	}
+	// Read and trim the listen port from the environment (Cloud Run injects PORT).
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	// Fall back to the development port when PORT is unset or whitespace-only.
+	if port == "" {
+		// Warn that Cloud Run should supply PORT in production.
+		tslog.Warn(fmt.Sprintf("PORT environment variable not set, defaulting to %s", srvPort))
+		// Use the development port.
+		port = srvPort
+	}
+	// Construct the listen address for all interfaces.
+	serverAddr := srvAddr + port
+	// Read the bearer token protecting the generate endpoint.
+	token := os.Getenv("API_TOKEN")
+	// Fail fast if API_TOKEN is unset or whitespace-only.
+	if strings.TrimSpace(token) == "" {
+		// Return a not-set error when API_TOKEN is missing or blank.
+		return tserr.NotSet("API_TOKEN")
+	}
+	// Construct the HTTP server handler wrapping the generator.
+	handler, err := NewCommitServer(token)
+	// Return the error if the server handler cannot be constructed.
+	if err != nil {
+		// Wrap the server construction failure with the target listen address.
+		return tserr.Op(&tserr.OpArgs{Op: "new commit server", Fn: serverAddr, Err: err})
+	}
+	// Construct the HTTP server bound to the configured address and timeouts.
+	server := &http.Server{
+		Addr:              serverAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+	// Buffer a listener error so the server goroutine never blocks on send.
+	errCh := make(chan error, 1)
+	// Start the HTTP listener in a separate goroutine.
+	go func() {
+		// Log the address on which the server is starting.
+		tslog.Info(fmt.Sprintf("Starting CommitServer on %v", serverAddr))
+		// Serve incoming requests and forward unexpected listener errors.
+		if err := listenAndServe(server); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			// Send the unexpected listener failure to RunContext.
+			errCh <- err
+		}
+	}()
+	// Wait until ctx is canceled or the listener fails unexpectedly.
+	select {
+	case err := <-errCh:
+		// Return the wrapped listener error immediately.
+		return tserr.Op(&tserr.OpArgs{Op: "ListenAndServe", Fn: serverAddr, Err: err})
+	case <-ctx.Done():
+	}
+	// Log that graceful shutdown has started after context cancellation.
+	tslog.Info("Shutting down server gracefully...")
+	// Bound the graceful shutdown duration so draining requests cannot hang indefinitely.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	// Release the shutdown context resources when RunContext returns.
+	defer cancel()
+	// Attempt to gracefully shut down the server and drain active connections.
+	if err := shutdownServer(shutdownCtx, server); err != nil {
+		// Return the wrapped shutdown failure when draining does not complete cleanly.
+		return tserr.Op(&tserr.OpArgs{Op: "Shutdown", Fn: serverAddr, Err: err})
+	}
+	// Log that the server has exited cleanly.
+	tslog.Info("Server successfully exited")
+	// Return no error to indicate a clean server lifecycle.
+	return nil
+}
+
 // retrieveHandler handles POST requests in r carrying a JSON-encoded unified
 // diff and writes the generated Conventional Commits tscommit.Message as JSON
 // to w, or writes an HTTP error response if the method, payload, or generation
@@ -237,7 +348,7 @@ func (s *CommitServer) retrieveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Bound the total generation time so slow upstream calls cancel cleanly before WriteTimeout.
-	ctx, cancel := context.WithTimeout(r.Context(), GenerateTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), generateTimeout)
 	// Release the timeout context resources when the handler returns.
 	defer cancel()
 	// Generate the commit message using the bounded request context.
