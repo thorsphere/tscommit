@@ -726,3 +726,292 @@ func TestRetrieveHandlerWriteFailure(t *testing.T) {
 		t.Errorf("retrieveHandler generateMessage calls = %v, want 1", fake.calls)
 	}
 }
+
+// fakeLifecycle scripts the HTTP listener and graceful shutdown seams without
+// opening a network socket. The zero value blocks listen until closed and
+// succeeds on shutdown.
+type fakeLifecycle struct {
+	listenErr       error              // The error returned by listenAndServe; nil maps to http.ErrServerClosed on shutdown.
+	shutdownErr     error              // The error returned by shutdownServer.
+	cancelOnListen  context.CancelFunc // Optional cancel function invoked once listenAndServe starts.
+	closed          chan struct{}      // Closed when shutdownServer runs so a blocking listenAndServe returns.
+	listenCalls     int                // The number of listenAndServe invocations.
+	shutdownCalls   int                // The number of shutdownServer invocations.
+	addr            string             // The configured Addr observed on the http.Server.
+	hasHandler      bool               // Whether the http.Server carried a non-nil Handler.
+	hasTimeouts     bool               // Whether the http.Server carried positive timeouts on every socket bound.
+	hasShutdownLine bool               // Whether the shutdown context carried a deadline.
+}
+
+// newFakeLifecycle returns an initialized fakeLifecycle ready for seam injection.
+func newFakeLifecycle(listenErr, shutdownErr error, cancelOnListen context.CancelFunc) *fakeLifecycle {
+	// Return a fakeLifecycle with an initialized close channel.
+	return &fakeLifecycle{
+		listenErr:      listenErr,
+		shutdownErr:    shutdownErr,
+		cancelOnListen: cancelOnListen,
+		closed:         make(chan struct{}),
+	}
+}
+
+// listen records the server configuration, optionally cancels the run context,
+// and either returns listenErr immediately or waits for shutdown.
+func (f *fakeLifecycle) listen(s *http.Server) error {
+	// Record the listener invocation.
+	f.listenCalls++
+	// Record the bound server address.
+	f.addr = s.Addr
+	// Record whether a request handler was wired onto the server.
+	f.hasHandler = s.Handler != nil
+	// Record whether all four HTTP socket timeouts were configured.
+	f.hasTimeouts = s.ReadHeaderTimeout > 0 && s.ReadTimeout > 0 && s.WriteTimeout > 0 && s.IdleTimeout > 0
+	// Return the scripted listener failure immediately when set.
+	if f.listenErr != nil {
+		// Replay the scripted listener error.
+		return f.listenErr
+	}
+	// Trigger context cancellation once the listener is active when requested.
+	if f.cancelOnListen != nil {
+		// Cancel the caller's run context to initiate graceful shutdown.
+		f.cancelOnListen()
+	}
+	// Block until shutdownServer closes the fake listener.
+	<-f.closed
+	// Return http.ErrServerClosed to match net/http Shutdown semantics.
+	return http.ErrServerClosed
+}
+
+// shutdown records the shutdown context deadline, unblocks listen, and returns
+// the scripted shutdown error.
+func (f *fakeLifecycle) shutdown(ctx context.Context, _ *http.Server) error {
+	// Record the shutdown invocation.
+	f.shutdownCalls++
+	// Record whether RunContext attached a bounded deadline to the shutdown context.
+	_, f.hasShutdownLine = ctx.Deadline()
+	// Unblock the waiting fake listener on the first shutdown call.
+	if f.shutdownCalls == 1 {
+		// Close the channel so listen returns http.ErrServerClosed.
+		close(f.closed)
+	}
+	// Return the scripted shutdown outcome.
+	return f.shutdownErr
+}
+
+// useFakeLifecycle swaps the listener and shutdown seams for the duration of
+// the test. Tests using it must not call t.Parallel.
+func useFakeLifecycle(t *testing.T, f *fakeLifecycle) {
+	// Mark the test function as test helper function.
+	t.Helper()
+	// Swap the listener seam and restore it at test cleanup.
+	t.Cleanup(srv.SetListenAndServe(f.listen))
+	// Swap the shutdown seam and restore it at test cleanup.
+	t.Cleanup(srv.SetShutdownServer(f.shutdown))
+}
+
+// TestRunContext tests RunContext across nil-context validation, PORT fallback
+// and custom port binding, API_TOKEN and OPENROUTER_API_KEY validation,
+// listener startup errors, graceful shutdown on context cancellation, and
+// shutdown failures. It mutates environment variables and package seams and
+// must not call t.Parallel.
+func TestRunContext(t *testing.T) {
+	// Define the test cases.
+	cases := []struct {
+		name         string // The scenario name.
+		nilCtx       bool   // Whether to pass a nil context to RunContext.
+		port         string // The PORT environment variable installed for the subtest.
+		token        string // The API_TOKEN environment variable installed for the subtest.
+		key          string // The OPENROUTER_API_KEY environment variable installed for the subtest.
+		listenErr    error  // The scripted error returned by listenAndServe.
+		shutdownErr  error  // The scripted error returned by shutdownServer.
+		wantErr      bool   // Whether RunContext must return an error.
+		wantErrText  string // Substring the returned error must contain.
+		wantAddr     string // The expected http.Server Addr when listenAndServe runs.
+		wantListen   int    // The expected number of listenAndServe calls.
+		wantShutdown int    // The expected number of shutdownServer calls.
+	}{
+		{
+			name:        "nil context fails before reading config",
+			nilCtx:      true,
+			port:        "9090",
+			token:       "swordfish",
+			key:         "sk-or-v1-test-key",
+			wantErr:     true,
+			wantErrText: "context cannot be empty",
+		},
+		{
+			name:        "missing API_TOKEN fails before starting listener",
+			port:        "9090",
+			token:       "",
+			key:         "sk-or-v1-test-key",
+			wantErr:     true,
+			wantErrText: "API_TOKEN",
+		},
+		{
+			name:        "whitespace API_TOKEN fails before starting listener",
+			port:        "9090",
+			token:       "   \t\n",
+			key:         "sk-or-v1-test-key",
+			wantErr:     true,
+			wantErrText: "API_TOKEN",
+		},
+		{
+			name:        "missing OPENROUTER_API_KEY fails server construction",
+			port:        "9090",
+			token:       "swordfish",
+			key:         "",
+			wantErr:     true,
+			wantErrText: "new commit server",
+		},
+		{
+			name:         "unset PORT defaults to 8080 and shuts down cleanly",
+			port:         "",
+			token:        "swordfish",
+			key:          "sk-or-v1-test-key",
+			wantAddr:     ":8080",
+			wantListen:   1,
+			wantShutdown: 1,
+		},
+		{
+			name:         "whitespace PORT defaults to 8080 and shuts down cleanly",
+			port:         "  \t ",
+			token:        "swordfish",
+			key:          "sk-or-v1-test-key",
+			wantAddr:     ":8080",
+			wantListen:   1,
+			wantShutdown: 1,
+		},
+		{
+			name:         "custom PORT is trimmed, bound, and shuts down cleanly",
+			port:         " 9090 ",
+			token:        "swordfish",
+			key:          "sk-or-v1-test-key",
+			wantAddr:     ":9090",
+			wantListen:   1,
+			wantShutdown: 1,
+		},
+		{
+			name:        "listener failure returns error without running shutdown",
+			port:        "9090",
+			token:       "swordfish",
+			key:         "sk-or-v1-test-key",
+			listenErr:   errors.New("address already in use"),
+			wantErr:     true,
+			wantErrText: "address already in use",
+			wantAddr:    ":9090",
+			wantListen:  1,
+		},
+		{
+			name:         "shutdown failure returns wrapped error",
+			port:         "9090",
+			token:        "swordfish",
+			key:          "sk-or-v1-test-key",
+			shutdownErr:  context.DeadlineExceeded,
+			wantErr:      true,
+			wantErrText:  "Shutdown",
+			wantAddr:     ":9090",
+			wantListen:   1,
+			wantShutdown: 1,
+		},
+	}
+	// Run each scenario against RunContext.
+	for _, tc := range cases {
+		// Run the test.
+		t.Run(tc.name, func(t *testing.T) {
+			// Install the scenario PORT value for the subtest.
+			t.Setenv("PORT", tc.port)
+			// Install the scenario API_TOKEN value for the subtest.
+			t.Setenv("API_TOKEN", tc.token)
+			// Install the scenario OPENROUTER_API_KEY value for the subtest.
+			t.Setenv("OPENROUTER_API_KEY", tc.key)
+			// Build a cancellable context so fakeLifecycle can trigger graceful shutdown.
+			runCtx, cancel := context.WithCancel(context.Background())
+			// Ensure the context resources are released at subtest cleanup.
+			defer cancel()
+			// Install the scripted HTTP lifecycle seams.
+			fake := newFakeLifecycle(tc.listenErr, tc.shutdownErr, cancel)
+			// Swap the listener and shutdown seams for the duration of the subtest.
+			useFakeLifecycle(t, fake)
+			// Select the context passed to RunContext.
+			var ctx context.Context = runCtx
+			// Replace ctx with nil when testing the nil-context guard.
+			if tc.nilCtx {
+				// Use a nil context to exercise the guard branch.
+				ctx = nil
+			}
+			// Execute RunContext with the scenario configuration.
+			err := srv.RunContext(ctx)
+			// Check the error expectation.
+			if tc.wantErr {
+				// Fail if an expected error is missing.
+				if err == nil {
+					// Report the missing RunContext error.
+					t.Error(tserr.NilFailed("RunContext"))
+				} else if tc.wantErrText != "" && !strings.Contains(err.Error(), tc.wantErrText) {
+					// Report the missing diagnostic substring in the error.
+					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "RunContext error text", Actual: err.Error(), Want: fmt.Sprintf("text containing %q", tc.wantErrText)}))
+				}
+			} else if err != nil {
+				// Report the unexpected RunContext error.
+				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "RunContext", Err: err}))
+			}
+			// Check the listener seam call count.
+			if fake.listenCalls != tc.wantListen {
+				// Report the listener invocation count mismatch.
+				t.Errorf("RunContext listenAndServe calls = %v, want %v", fake.listenCalls, tc.wantListen)
+			}
+			// Check the shutdown seam call count.
+			if fake.shutdownCalls != tc.wantShutdown {
+				// Report the shutdown invocation count mismatch.
+				t.Errorf("RunContext shutdownServer calls = %v, want %v", fake.shutdownCalls, tc.wantShutdown)
+			}
+			// Verify the constructed http.Server fields whenever listenAndServe ran.
+			if tc.wantListen > 0 {
+				// Check the bound server address.
+				if fake.addr != tc.wantAddr {
+					// Report the server address mismatch.
+					t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "RunContext server Addr", Actual: fake.addr, Want: tc.wantAddr}))
+				}
+				// Verify a non-nil CommitServer handler was attached.
+				if !fake.hasHandler {
+					// Report the missing HTTP handler on the server.
+					t.Errorf("RunContext server Handler = nil, want non-nil")
+				}
+				// Verify all four HTTP socket timeouts were configured.
+				if !fake.hasTimeouts {
+					// Report missing HTTP socket timeouts.
+					t.Errorf("RunContext server timeouts incomplete, want positive ReadHeader, Read, Write, and Idle timeouts")
+				}
+			}
+			// Verify graceful shutdown received a bounded deadline context.
+			if tc.wantShutdown > 0 && !fake.hasShutdownLine {
+				// Report the missing shutdown deadline.
+				t.Errorf("RunContext shutdown context has no deadline, want shutdownTimeout deadline")
+			}
+		})
+	}
+}
+
+// TestRun tests that Run delegates to RunContext with a background context. It
+// mutates environment variables and package seams and must not call t.Parallel.
+func TestRun(t *testing.T) {
+	// Install a valid port, bearer token, and provider API key.
+	t.Setenv("PORT", "8080")
+	// Install the bearer token for server construction.
+	t.Setenv("API_TOKEN", "swordfish")
+	// Install the provider API key for generator construction.
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-test-key")
+	// Script a listener failure so Run returns deterministically without signal cancellation.
+	fake := newFakeLifecycle(errors.New("bind failed"), nil, nil)
+	// Swap the listener and shutdown seams for the duration of the test.
+	useFakeLifecycle(t, fake)
+	// Invoke Run and verify the listener error propagates back.
+	err := srv.Run()
+	// Fail if Run did not surface the listener error.
+	if err == nil {
+		// Report the missing error from Run.
+		t.Error(tserr.NilFailed("Run"))
+	} else if !strings.Contains(err.Error(), "bind failed") {
+		// Report the missing listener diagnostic text.
+		t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Run error text", Actual: err.Error(), Want: `text containing "bind failed"`}))
+	}
+}

@@ -49,3 +49,27 @@ func SetGenerateMessage(fn func(ctx context.Context, gen *tscommit.Generator, di
 	// Return a function to restore the previous generation seam.
 	return func() { generateMessage = prev }
 }
+
+// SetListenAndServe swaps the HTTP listener seam for tests and returns a
+// restore function (pass it to t.Cleanup). Tests using it must not call
+// t.Parallel.
+func SetListenAndServe(fn func(srv *http.Server) error) func() {
+	// Save the current HTTP listener seam.
+	prev := listenAndServe
+	// Set the new HTTP listener seam.
+	listenAndServe = fn
+	// Return a function to restore the previous HTTP listener seam.
+	return func() { listenAndServe = prev }
+}
+
+// SetShutdownServer swaps the HTTP server shutdown seam for tests and returns a
+// restore function (pass it to t.Cleanup). Tests using it must not call
+// t.Parallel.
+func SetShutdownServer(fn func(ctx context.Context, srv *http.Server) error) func() {
+	// Save the current HTTP shutdown seam.
+	prev := shutdownServer
+	// Set the new HTTP shutdown seam.
+	shutdownServer = fn
+	// Return a function to restore the previous HTTP shutdown seam.
+	return func() { shutdownServer = prev }
+}
