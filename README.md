@@ -114,7 +114,7 @@ You will be shown the generation summary, the generated message, and asked
 what to do:
 
 ```sh
-Diff: 1420 | Model: google/gemini-3-flash-preview | Tokens: 412 | Cost: $0.00031
+Diff: 1420 chars | Model: google/gemini-3-flash-preview | Tokens: 412 | Cost: $0.00031
 
 feat(git): add staged-diff truncation
 

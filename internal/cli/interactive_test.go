@@ -264,7 +264,7 @@ func TestRunContext(t *testing.T) {
 			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
-			wantOutText: "Diff: 33 | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
+			wantOutText: "Diff: 33 chars | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
 			input:       "y\n",
 		},
 		{
@@ -278,7 +278,7 @@ func TestRunContext(t *testing.T) {
 			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
-			wantOutText: "Diff: 100000 (Truncated) | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
+			wantOutText: "Diff: 100000 (Truncated) chars | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
 		},
 		{
 			name:        "enter accepts the default choice",

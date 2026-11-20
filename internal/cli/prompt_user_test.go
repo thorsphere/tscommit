@@ -84,7 +84,7 @@ func TestPromptUserSelects(t *testing.T) {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "promptUser", Actual: got, Want: tc.want}))
 			}
 			// The generation summary line must appear before the candidate message.
-			wantSummary := "Diff: 1420 | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025"
+			wantSummary := "Diff: 1420 chars | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025"
 			// Fail when the summary line is missing from the output.
 			if !strings.Contains(buf.String(), wantSummary) {
 				t.Errorf("output %q does not show the summary line %q", buf.String(), wantSummary)
@@ -253,10 +253,10 @@ func TestPromptUserConfidence(t *testing.T) {
 		wantSummary string  // The expected rendered summary header; empty when omitted.
 		wantLine    string  // The expected rendered confidence line; empty when omitted.
 	}{
-		{"shown as rounded percentage", 0.924, false, true, "Diff: 500 | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 92%"},
-		{"shown with truncated diff", 0.5, true, true, "Diff: 500 (Truncated) | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 50%"},
-		{"shown at zero boundary", 0, false, true, "Diff: 500 | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 0%"},
-		{"shown at max boundary", 1.0, false, true, "Diff: 500 | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 100%"},
+		{"shown as rounded percentage", 0.924, false, true, "Diff: 500 chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 92%"},
+		{"shown with truncated diff", 0.5, true, true, "Diff: 500 (Truncated) chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 50%"},
+		{"shown at zero boundary", 0, false, true, "Diff: 500 chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 0%"},
+		{"shown at max boundary", 1.0, false, true, "Diff: 500 chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 100%"},
 		{"omitted when disabled", 0.92, true, false, "", ""},
 	}
 	// Run the test cases.
@@ -389,28 +389,28 @@ func TestFormatSummary(t *testing.T) {
 			diffChars: 1420,
 			truncated: false,
 			res:       tscommit.Message{Model: "google/gemini-4-hydrogen", TotalTokens: 320, Cost: 0.0025},
-			want:      "Diff: 1420 | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
+			want:      "Diff: 1420 chars | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
 		},
 		{
 			name:      "truncated diff adds marker",
 			diffChars: 100000,
 			truncated: true,
 			res:       tscommit.Message{Model: "openai/gpt-5", TotalTokens: 1500, Cost: 0.015},
-			want:      "Diff: 100000 (Truncated) | Model: openai/gpt-5 | Tokens: 1500 | Cost: $0.015",
+			want:      "Diff: 100000 (Truncated) chars | Model: openai/gpt-5 | Tokens: 1500 | Cost: $0.015",
 		},
 		{
 			name:      "unreported metadata uses n/a and zero cost without scientific notation",
 			diffChars: 42,
 			truncated: false,
 			res:       tscommit.Message{},
-			want:      "Diff: 42 | Model: n/a | Tokens: 0 | Cost: $0",
+			want:      "Diff: 42 chars | Model: n/a | Tokens: 0 | Cost: $0",
 		},
 		{
 			name:      "sub-cent micro cost avoids scientific notation",
 			diffChars: 80,
 			truncated: false,
 			res:       tscommit.Message{Model: "m1", TotalTokens: 12, Cost: 0.000042},
-			want:      "Diff: 80 | Model: m1 | Tokens: 12 | Cost: $0.000042",
+			want:      "Diff: 80 chars | Model: m1 | Tokens: 12 | Cost: $0.000042",
 		},
 	}
 	// Run the test cases.
