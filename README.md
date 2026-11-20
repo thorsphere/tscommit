@@ -40,6 +40,9 @@ any service or workflow, while an optional interactive CLI layer
   diff-clarity rubric (`0%`–`100%`) returned in `Message.Confidence` and
   displayed in the interactive review prompt (omitted once edited), and
   strips any stray markdown fences or wrapper quotes from the message.
+- **Completion metadata for metering**: `Message` also reports the serving
+  `Model`, the `TotalTokens` billed across all generation attempts, and the
+  `Cost` in USD when the provider reports it, ready for logging and metering.
 - **Interactive review loop**: accept, edit in `$EDITOR`, regenerate, or
   cancel before anything is committed. User-edited messages are
   authoritative and never re-validated.
@@ -107,9 +110,12 @@ git add -A
 ./tscommit
 ```
 
-You will be shown the generated message and asked what to do:
+You will be shown the generation summary, the generated message, and asked
+what to do:
 
 ```sh
+Diff: 1420 | Model: google/gemini-3-flash-preview | Tokens: 412 | Cost: $0.00031
+
 feat(git): add staged-diff truncation
 
 Large diffs previously overflowed the prompt window. Truncate at 30k
@@ -121,7 +127,7 @@ Apply this commit? [Y/e/r/n] (Y=commit, e=edit, r=regenerate, n=cancel):
 ```
 
 - commit: create the git commit with the shown message.
-- edit: open the message in $EDITOR; the edited text is used as-is (and the AI confidence line is omitted on re-prompt).
+- edit: open the message in $EDITOR; the edited text is used as-is (and the AI summary and confidence lines are omitted on re-prompt).
 - regenerate: ask the model for a fresh message and confidence score for the same diff.
 - cancel: abort without committing.
 
@@ -171,8 +177,19 @@ func RunContext(ctx context.Context) error
 // freshly minted sticky routing key.
 func NewGenerator() (*Generator, error)
 
-// Generate returns a validated Conventional Commits Message and model
-// confidence score for diff.
+// Message holds a generated Conventional Commits message, its model
+// confidence score, and completion metadata (Model, TotalTokens, Cost).
+type Message struct {
+    Text        string  `json:"text"`         // The generated commit message.
+    Confidence  float64 `json:"confidence"`   // The model confidence score in [0, 1].
+    Model       string  `json:"model"`        // The serving model identifier; empty if unreported.
+    TotalTokens int     `json:"total_tokens"` // The total tokens billed across attempts.
+    Cost        float64 `json:"cost"`         // The completion cost in USD across attempts.
+}
+
+// Generate returns a validated Conventional Commits Message for diff; the
+// Message carries the commit text, the model confidence score, the serving
+// model, the total billed tokens, and the completion cost.
 func (g *Generator) Generate(ctx context.Context, diff string) (Message, error)
 ```
 
