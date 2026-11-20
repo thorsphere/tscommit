@@ -6,10 +6,12 @@ package cli
 
 // Import packages
 import (
-	"context" // Import the context package for cancellation-aware operations.
-	"fmt"     // Import the fmt package for formatted output and error wrapping.
-	"regexp"  // Import the regexp package for matching breaking change footers.
-	"strings" // Import the strings package for string trimming and formatting.
+	"context"      // Import the context package for cancellation-aware operations.
+	"fmt"          // Import the fmt package for formatted output and error wrapping.
+	"regexp"       // Import the regexp package for matching breaking change footers.
+	"strconv"      // Import the strconv package for formatting floating-point cost values.
+	"strings"      // Import the strings package for string trimming and formatting.
+	"unicode/utf8" // Import the utf8 package for counting characters (runes) in diffs.
 
 	"github.com/thorsphere/lpcli"                 // Import the lpcli package for interactive prompting.
 	"github.com/thorsphere/tscommit"              // Import the tscommit package for commit message generation.
@@ -116,20 +118,20 @@ func RunContext(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Generate the initial commit message and model confidence score.
+	// Measure the diff length in characters and check whether StagedDiff truncated it.
+	diffChars, truncated := diffInfo(diff)
+	// Generate the initial commit message and completion metadata.
 	res, err := generateMessage(ctx, gen, diff)
 	// Return the error if message generation fails.
 	if err != nil {
 		return err
 	}
-	// Track the active commit message text and confidence across loop turns.
-	msg, confidence := res.Text, res.Confidence
 	// Track whether the current message came directly from the AI model.
-	showConfidence := true
+	showAI := true
 	// Prompt the user until they accept, edit, regenerate, or cancel.
 	for {
 		// Ask the user what to do with the current message.
-		choice, err := promptUser(ctx, p, msg, confidence, showConfidence)
+		choice, err := promptUser(ctx, p, res, diffChars, truncated, showAI)
 		// Return the error if prompting fails.
 		if err != nil {
 			return abortOr(ctx, err)
@@ -138,29 +140,27 @@ func RunContext(ctx context.Context) error {
 		switch choice {
 		case choiceAccept:
 			// Create the git commit with the current message.
-			return commit(ctx, msg)
+			return commit(ctx, res.Text)
 		case choiceEdit:
 			// Open the message in the user's editor.
-			edited, err := editInEditor(ctx, p, msg)
+			edited, err := editInEditor(ctx, p, res.Text)
 			// Return the error if editing fails.
 			if err != nil {
 				return abortOr(ctx, err)
 			}
-			// Adopt the user's edit as the new message; it is authoritative.
-			msg = edited
-			// Omit the AI confidence score once the user has edited the message.
-			showConfidence = false
+			// Adopt the user's edit as the active commit message; it is authoritative.
+			res.Text = edited
+			// Omit the AI generation summary and confidence score once the user has edited the message.
+			showAI = false
 		case choiceRegenerate:
-			// Generate a fresh message and confidence score on the same generator.
+			// Generate a fresh message and completion metadata on the same generator.
 			res, err = generateMessage(ctx, gen, diff)
 			// Return the error if message generation fails.
 			if err != nil {
 				return abortOr(ctx, err)
 			}
-			// Adopt the freshly generated message and confidence score.
-			msg, confidence = res.Text, res.Confidence
-			// Re-enable the AI confidence display for the newly generated message.
-			showConfidence = true
+			// Re-enable the AI summary and confidence display for the newly generated message.
+			showAI = true
 		case choiceCancel:
 			// Return an aborted error when the user cancels.
 			return tserr.Aborted("commit")
@@ -198,22 +198,63 @@ func warnBreakingChange(p *lpcli.Prompter, msg string) {
 	}
 }
 
-// promptUser returns the choice value selected by the user after showing msg,
-// displaying confidence when showConfidence is true, and warning when msg
-// carries a breaking-change marker, or an empty string and error if prompting
-// fails.
-func promptUser(ctx context.Context, p *lpcli.Prompter, msg string, confidence float64, showConfidence bool) (string, error) {
+// diffInfo returns the staged diff character count and reports whether diff
+// carries the truncation marker appended by git.StagedDiff. When truncated,
+// the marker itself is excluded from diffChars so the count reflects the
+// actual diff characters sent to the model.
+func diffInfo(diff string) (diffChars int, truncated bool) {
+	// Strip the truncation marker when present to measure only the diff content.
+	trimmed, wasTruncated := strings.CutSuffix(diff, git.TruncatedSuffix)
+	// Return the character (rune) count and truncation status.
+	return utf8.RuneCountInString(trimmed), wasTruncated
+}
+
+// formatSummary returns the single-line generation summary header displaying
+// diffChars, an optional "(Truncated)" indicator when truncated is true, the
+// serving model from res, the total tokens billed, and the completion cost in
+// USD.
+func formatSummary(diffChars int, truncated bool, res tscommit.Message) string {
+	// Include the truncation tag only when the staged diff was truncated.
+	truncTag := ""
+	// Append the truncation tag when truncated is true.
+	if truncated {
+		// Mark that the staged diff hit the character limit.
+		truncTag = " (Truncated)"
+	}
+	// Fall back to n/a when the provider did not report a serving model.
+	model := res.Model
+	// Replace an empty model identifier with the fallback label.
+	if model == "" {
+		// Indicate that no serving model was reported.
+		model = "n/a"
+	}
+	// Render the cost in USD without scientific notation.
+	cost := "$" + strconv.FormatFloat(res.Cost, 'f', -1, 64)
+	// Assemble and return the compact summary header line.
+	return fmt.Sprintf("Diff: %d%s chars | Model: %s | Tokens: %d | Cost: %s", diffChars, truncTag, model, res.TotalTokens, cost)
+}
+
+// promptUser returns the choice value selected by the user after showing the
+// AI generation summary and confidence score when showAI is true, showing the
+// candidate commit message res.Text, and warning when res.Text carries a
+// breaking-change marker, or an empty string and error if prompting fails.
+func promptUser(ctx context.Context, p *lpcli.Prompter, res tscommit.Message, diffChars int, truncated bool, showAI bool) (string, error) {
+	// Show the AI generation summary before the commit message when enabled.
+	if showAI {
+		// Print the compact summary header followed by a blank line.
+		fmt.Fprintf(p.Out(), "%s\n\n", formatSummary(diffChars, truncated, res))
+	}
 	// Show the candidate commit message so the user can review it.
-	fmt.Fprintln(p.Out(), msg)
+	fmt.Fprintln(p.Out(), res.Text)
 	// Separate the message from the metadata, warning, and prompt for readability.
 	fmt.Fprintln(p.Out())
 	// Display the AI confidence score when the message came from the model.
-	if showConfidence {
+	if showAI {
 		// Print the confidence score as a rounded integer percentage.
-		fmt.Fprintf(p.Out(), "Confidence: %.0f%%\n\n", confidence*100)
+		fmt.Fprintf(p.Out(), "Confidence: %.0f%%\n\n", res.Confidence*100)
 	}
 	// Warn the user if the message contains a breaking-change marker.
-	warnBreakingChange(p, msg)
+	warnBreakingChange(p, res.Text)
 	// Ask the user what to do via the selection seam.
 	choice, err := selectChoice(ctx, p, lpcli.SelectOptions{
 		Message: "Apply this commit?",
