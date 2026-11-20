@@ -25,41 +25,58 @@ import (
 func TestGenMessage(t *testing.T) {
 	// Define the test cases.
 	cases := []struct {
-		name           string
-		script         []chatTurn // The scripted provider turns.
-		want           string     // The expected message.
-		wantConfidence float64    // The expected confidence score.
-		wantErr        bool       // Whether an error is expected.
-		wantErrText    string     // Text the error must contain.
-		wantCalls      int        // The expected number of provider calls.
+		name        string           // The scenario name.
+		script      []chatTurn       // The scripted provider turns.
+		want        tscommit.Message // The expected message with completion metadata.
+		wantErr     bool             // Whether an error is expected.
+		wantErrText string           // Text the error must contain.
+		wantCalls   int              // The expected number of provider calls.
 	}{
 		{
-			name:           "valid on first attempt",
-			script:         []chatTurn{okTurn("feat(login): add login", 0.92)},
-			want:           "feat(login): add login",
-			wantConfidence: 0.92,
-			wantCalls:      1,
+			name:      "valid on first attempt",
+			script:    []chatTurn{okTurn("feat(login): add login", 0.92)},
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 0.92},
+			wantCalls: 1,
 		},
 		{
-			name:           "wrapper formatting cleaned",
-			script:         []chatTurn{okTurn("\"feat(login): add login\"", 0.85)},
-			want:           "feat(login): add login",
-			wantConfidence: 0.85,
-			wantCalls:      1,
+			name:      "wrapper formatting cleaned",
+			script:    []chatTurn{okTurn("\"feat(login): add login\"", 0.85)},
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 0.85},
+			wantCalls: 1,
 		},
 		{
-			name:           "zero confidence boundary accepted",
-			script:         []chatTurn{okTurn("feat(login): add login", 0)},
-			want:           "feat(login): add login",
-			wantConfidence: 0,
-			wantCalls:      1,
+			name:      "unreported metadata stays zero",
+			script:    []chatTurn{okTurnMeta("feat(login): add login", 0.75, "", 0, 0)},
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 0.75},
+			wantCalls: 1,
 		},
 		{
-			name:           "max confidence boundary accepted",
-			script:         []chatTurn{okTurn("feat(login): add login", 1.0)},
-			want:           "feat(login): add login",
-			wantConfidence: 1.0,
-			wantCalls:      1,
+			name: "first-attempt metadata propagated",
+			script: []chatTurn{{res: tsaiclient.JSONResult{
+				Envelope: tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.9},
+				Model:    "google/gemini-4-hydrogen",
+				Usage:    tsaiclient.Usage{PromptTokens: 3, CompletionTokens: 5, ReasoningTokens: 2, TotalTokens: 120, Cost: 0.125},
+			}}},
+			want: tscommit.Message{
+				Text:        "feat(login): add login",
+				Confidence:  0.9,
+				Model:       "google/gemini-4-hydrogen",
+				TotalTokens: 120,
+				Cost:        0.125,
+			},
+			wantCalls: 1,
+		},
+		{
+			name:      "zero confidence boundary accepted",
+			script:    []chatTurn{okTurn("feat(login): add login", 0)},
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 0},
+			wantCalls: 1,
+		},
+		{
+			name:      "max confidence boundary accepted",
+			script:    []chatTurn{okTurn("feat(login): add login", 1.0)},
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 1.0},
+			wantCalls: 1,
 		},
 		{
 			name: "retry after validation failure",
@@ -67,9 +84,23 @@ func TestGenMessage(t *testing.T) {
 				okTurn("wip(login): x", 0.4),
 				okTurn("feat(login): add login", 0.95),
 			},
-			want:           "feat(login): add login",
-			wantConfidence: 0.95,
-			wantCalls:      2,
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 0.95},
+			wantCalls: 2,
+		},
+		{
+			name: "retry accumulates metadata across validation failure",
+			script: []chatTurn{
+				okTurnMeta("wip(login): x", 0.4, "google/gemini-4-hydrogen", 120, 0.125),
+				okTurnMeta("feat(login): add login", 0.95, "google/gemini-4-hydrogen-001", 150, 0.25),
+			},
+			want: tscommit.Message{
+				Text:        "feat(login): add login",
+				Confidence:  0.95,
+				Model:       "google/gemini-4-hydrogen-001",
+				TotalTokens: 270,
+				Cost:        0.375,
+			},
+			wantCalls: 2,
 		},
 		{
 			name: "retry after truncation",
@@ -80,15 +111,49 @@ func TestGenMessage(t *testing.T) {
 				}},
 				okTurn("feat(login): add login", 0.9),
 			},
-			want:           "feat(login): add login",
-			wantConfidence: 0.9,
-			wantCalls:      2,
+			want:      tscommit.Message{Text: "feat(login): add login", Confidence: 0.9},
+			wantCalls: 2,
+		},
+		{
+			name: "retry accumulates metadata across truncation",
+			script: []chatTurn{
+				{res: tsaiclient.JSONResult{
+					Envelope:  tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.8},
+					Model:     "m1",
+					Truncated: true,
+					Usage:     tsaiclient.Usage{TotalTokens: 100, Cost: 0.125},
+				}},
+				okTurnMeta("feat(login): add login", 0.9, "m1", 200, 0.25),
+			},
+			want: tscommit.Message{
+				Text:        "feat(login): add login",
+				Confidence:  0.9,
+				Model:       "m1",
+				TotalTokens: 300,
+				Cost:        0.375,
+			},
+			wantCalls: 2,
+		},
+		{
+			name: "model falls back to latest non-empty across retry",
+			script: []chatTurn{
+				okTurnMeta("wip(login): x", 0.4, "m1", 10, 0.125),
+				okTurnMeta("feat(login): add login", 0.95, "", 20, 0.25),
+			},
+			want: tscommit.Message{
+				Text:        "feat(login): add login",
+				Confidence:  0.95,
+				Model:       "m1",
+				TotalTokens: 30,
+				Cost:        0.375,
+			},
+			wantCalls: 2,
 		},
 		{
 			name: "invalid on both attempts",
 			script: []chatTurn{
-				okTurn("wip(login): x", 0.5),
-				okTurn("wip(login): y", 0.5),
+				okTurnMeta("wip(login): x", 0.5, "m1", 10, 0.125),
+				okTurnMeta("wip(login): y", 0.5, "m2", 20, 0.25),
 			},
 			wantErr:     true,
 			wantErrText: "generate message",
@@ -99,11 +164,15 @@ func TestGenMessage(t *testing.T) {
 			script: []chatTurn{
 				{res: tsaiclient.JSONResult{
 					Envelope:  tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.8},
+					Model:     "m1",
 					Truncated: true,
+					Usage:     tsaiclient.Usage{TotalTokens: 10, Cost: 0.125},
 				}},
 				{res: tsaiclient.JSONResult{
 					Envelope:  tsaiclient.Envelope{Findings: []string{"feat(login): add login"}, Confidence: 0.8},
+					Model:     "m2",
 					Truncated: true,
+					Usage:     tsaiclient.Usage{TotalTokens: 20, Cost: 0.25},
 				}},
 			},
 			wantErr:     true,
@@ -171,18 +240,18 @@ func TestGenMessage(t *testing.T) {
 			useFakeChat(t, fake)
 			// Generate the message; the nil client is never reached because
 			// the seam intercepts the only call site.
-			got, gotConf, err := tscommit.GenMessage(context.Background(), nil, "diff --git a/x b/x", "session-42")
+			got, err := tscommit.GenMessage(context.Background(), nil, "diff --git a/x b/x", "session-42")
 			// If the error state doesn't match, fail the test.
 			if (err != nil) != tc.wantErr {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "genMessage error", Actual: fmt.Sprintf("%v", err != nil), Want: fmt.Sprintf("%v", tc.wantErr)}))
 			}
+			// Verify the zero-value Message contract on error.
+			if tc.wantErr && got != (tscommit.Message{}) {
+				t.Errorf("genMessage message on error = %+v, want zero Message{}", got)
+			}
 			// If the message differs from the expectation, fail the test.
 			if got != tc.want {
-				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "genMessage", Actual: fmt.Sprintf("%q", got), Want: fmt.Sprintf("%q", tc.want)}))
-			}
-			// If the confidence differs from the expectation, fail the test.
-			if gotConf != tc.wantConfidence {
-				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "genMessage confidence", Actual: fmt.Sprintf("%v", gotConf), Want: fmt.Sprintf("%v", tc.wantConfidence)}))
+				t.Errorf("genMessage = %+v, want %+v", got, tc.want)
 			}
 			// If the provider call count is wrong, fail the test.
 			if fake.calls != tc.wantCalls {

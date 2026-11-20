@@ -22,14 +22,27 @@ type chatTurn struct {
 }
 
 // okTurn returns a scripted chatTurn carrying a single-finding envelope with
-// msg and confidence.
+// msg and confidence and no completion metadata.
 func okTurn(msg string, confidence float64) chatTurn {
-	// Wrap the message and confidence in a single-finding structured result.
+	// Delegate to okTurnMeta with empty completion metadata.
+	return okTurnMeta(msg, confidence, "", 0, 0)
+}
+
+// okTurnMeta returns a scripted chatTurn carrying a single-finding envelope
+// with msg and confidence plus the completion metadata model, totalTokens,
+// and cost on the structured result.
+func okTurnMeta(msg string, confidence float64, model string, totalTokens int, cost float64) chatTurn {
+	// Wrap the message, confidence, and completion metadata in a single-finding structured result.
 	return chatTurn{
 		res: tsaiclient.JSONResult{
 			Envelope: tsaiclient.Envelope{
 				Findings:   []string{msg},
 				Confidence: confidence,
+			},
+			Model: model,
+			Usage: tsaiclient.Usage{
+				TotalTokens: totalTokens,
+				Cost:        cost,
 			},
 		},
 	}

@@ -6,11 +6,12 @@ package tscommit_test
 
 // Import packages
 import (
-	"context" // Import the context package for cancellation and deadlines.
-	"errors"  // Import the errors package for sentinel error creation.
-	"fmt"     // Import the fmt package for formatting values in failure diagnostics.
-	"strings" // Import the strings package for substring assertions.
-	"testing" // Import the testing package for table-driven unit tests.
+	"context"       // Import the context package for cancellation and deadlines.
+	"encoding/json" // Import the json package for Message JSON round-trip tests.
+	"errors"        // Import the errors package for sentinel error creation.
+	"fmt"           // Import the fmt package for formatting values in failure diagnostics.
+	"strings"       // Import the strings package for substring assertions.
+	"testing"       // Import the testing package for table-driven unit tests.
 
 	"github.com/thorsphere/tscommit" // Import the tscommit package under test.
 	"github.com/thorsphere/tserr"    // Import the tserr package for error reporting.
@@ -125,19 +126,28 @@ func TestGeneratorGenerate(t *testing.T) {
 		wantSticky  bool               // Whether all provider calls must share one non-empty session ID.
 	}{
 		{
-			name:      "single call returns message and confidence",
-			diffs:     []string{"diff --git a/a.go b/a.go\n"},
-			script:    []chatTurn{okTurn("feat(core): add generator", 0.91)},
-			want:      []tscommit.Message{{Text: "feat(core): add generator", Confidence: 0.91}},
+			name:   "single call returns message and confidence",
+			diffs:  []string{"diff --git a/a.go b/a.go\n"},
+			script: []chatTurn{okTurnMeta("feat(core): add generator", 0.91, "google/gemini-4-hydrogen", 320, 0.5)},
+			want: []tscommit.Message{{
+				Text:        "feat(core): add generator",
+				Confidence:  0.91,
+				Model:       "google/gemini-4-hydrogen",
+				TotalTokens: 320,
+				Cost:        0.5,
+			}},
 			wantCalls: 1,
 		},
 		{
-			name:   "multiple calls reuse sticky session ID across diffs",
-			diffs:  []string{"diff --git a/a.go b/a.go\n", "diff --git a/b.go b/b.go\n"},
-			script: []chatTurn{okTurn("feat(core): add generator", 0.85), okTurn("fix(core): handle empty diff", 0.93)},
+			name:  "multiple calls reuse sticky session ID across diffs",
+			diffs: []string{"diff --git a/a.go b/a.go\n", "diff --git a/b.go b/b.go\n"},
+			script: []chatTurn{
+				okTurnMeta("feat(core): add generator", 0.85, "m1", 100, 0.125),
+				okTurnMeta("fix(core): handle empty diff", 0.93, "m2", 50, 0.25),
+			},
 			want: []tscommit.Message{
-				{Text: "feat(core): add generator", Confidence: 0.85},
-				{Text: "fix(core): handle empty diff", Confidence: 0.93},
+				{Text: "feat(core): add generator", Confidence: 0.85, Model: "m1", TotalTokens: 100, Cost: 0.125},
+				{Text: "fix(core): handle empty diff", Confidence: 0.93, Model: "m2", TotalTokens: 50, Cost: 0.25},
 			},
 			wantCalls:  2,
 			wantSticky: true,
@@ -146,10 +156,16 @@ func TestGeneratorGenerate(t *testing.T) {
 			name:  "validation failure retries and recovers with same session ID",
 			diffs: []string{"diff --git a/a.go b/a.go\n"},
 			script: []chatTurn{
-				okTurn("invalid header without scope", 0.4),
-				okTurn("feat(core): add generator", 0.89),
+				okTurnMeta("invalid header without scope", 0.4, "m1", 10, 0.125),
+				okTurnMeta("feat(core): add generator", 0.89, "m2", 20, 0.25),
 			},
-			want:       []tscommit.Message{{Text: "feat(core): add generator", Confidence: 0.89}},
+			want: []tscommit.Message{{
+				Text:        "feat(core): add generator",
+				Confidence:  0.89,
+				Model:       "m2",
+				TotalTokens: 30,
+				Cost:        0.375,
+			}},
 			wantCalls:  2,
 			wantSticky: true,
 		},
@@ -157,8 +173,8 @@ func TestGeneratorGenerate(t *testing.T) {
 			name:  "validation failure on all attempts returns error and zero Message",
 			diffs: []string{"diff --git a/a.go b/a.go\n"},
 			script: []chatTurn{
-				okTurn("wip: missing scope", 0.5),
-				okTurn("feat: still missing scope", 0.5),
+				okTurnMeta("wip: missing scope", 0.5, "m1", 10, 0.125),
+				okTurnMeta("feat: still missing scope", 0.5, "m2", 20, 0.25),
 			},
 			wantErr:     true,
 			wantErrText: "generate message",
@@ -317,5 +333,42 @@ func TestGeneratorGenerate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMessageJSON tests that Message marshals to and unmarshals from JSON with
+// the exact snake_case keys text, confidence, model, total_tokens, and cost.
+func TestMessageJSON(t *testing.T) {
+	// Build a Message carrying every field.
+	msg := tscommit.Message{
+		Text:        "feat(core): add generator",
+		Confidence:  0.9,
+		Model:       "google/gemini-4-hydrogen",
+		TotalTokens: 320,
+		Cost:        0.5,
+	}
+	// Marshal the message to JSON.
+	data, err := json.Marshal(msg)
+	// Fail on any marshaling error.
+	if err != nil {
+		t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "json.Marshal", Err: err}))
+		return
+	}
+	// The wire shape must carry the exact snake_case keys in struct order.
+	wantJSON := `{"text":"feat(core): add generator","confidence":0.9,"model":"google/gemini-4-hydrogen","total_tokens":320,"cost":0.5}`
+	// Compare the marshaled JSON against the expected wire shape.
+	if got := string(data); got != wantJSON {
+		t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Message JSON", Actual: got, Want: wantJSON}))
+	}
+	// Unmarshal the JSON back into a Message.
+	var round tscommit.Message
+	// Fail on any unmarshaling error.
+	if err := json.Unmarshal(data, &round); err != nil {
+		t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "json.Unmarshal", Err: err}))
+		return
+	}
+	// The round-tripped message must equal the original.
+	if round != msg {
+		t.Errorf("Message round trip = %+v, want %+v", round, msg)
 	}
 }

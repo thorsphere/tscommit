@@ -7,8 +7,7 @@ package tscommit
 // Import packages
 import (
 	"context" // Import the context package for context handling.
-	// Import the io package for I/O.
-	// Import the lpcli package for interactive prompting.
+
 	"github.com/thorsphere/tsaiclient" // Import the tsaiclient package for AI client interactions.
 )
 
