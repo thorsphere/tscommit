@@ -18,12 +18,16 @@ import (
 	"github.com/thorsphere/tserr"      // Import the tserr package for error reporting.
 )
 
-// Message holds a generated Conventional Commits message and its model
-// confidence score. The zero value represents an empty message with no
-// confidence. It marshals to and from JSON with lowercase field names.
+// Message holds a generated Conventional Commits message, its model
+// confidence score, and completion metadata. The zero value represents an
+// empty message with no confidence or usage metadata. It marshals to and
+// from JSON with lowercase snake_case field names.
 type Message struct {
-	Text       string  `json:"text"`       // The generated commit message.
-	Confidence float64 `json:"confidence"` // The model confidence score in [0, 1].
+	Text        string  `json:"text"`         // The generated commit message.
+	Confidence  float64 `json:"confidence"`   // The model confidence score in [0, 1].
+	Model       string  `json:"model"`        // The identifier of the model that served the generation, or empty if not reported.
+	TotalTokens int     `json:"total_tokens"` // The total number of tokens billed across all attempts for this generation.
+	Cost        float64 `json:"cost"`         // The total completion cost in USD across all attempts; zero means not reported.
 }
 
 // Generator generates Conventional Commits messages from unified diffs via a
@@ -55,8 +59,10 @@ func NewGenerator() (*Generator, error) {
 	}, nil
 }
 
-// Generate returns a validated Conventional Commits Message and model
-// confidence score for diff using the generator's sticky routing key. It is
+// Generate returns a validated Conventional Commits Message for diff using
+// the generator's sticky routing key. The Message carries the commit text,
+// the model confidence score in [0, 1], the serving model identifier, the
+// total tokens billed across attempts, and the completion cost in USD. It is
 // purely non-interactive: it never prompts the user, touches the filesystem,
 // invokes git, or wires HTTP handlers. Callers are responsible for bounding
 // diff size before calling Generate (for example, truncating git output in the
@@ -81,15 +87,7 @@ func (g *Generator) Generate(ctx context.Context, diff string) (Message, error) 
 	if strings.TrimSpace(diff) == "" {
 		return Message{}, tserr.Empty("diff")
 	}
-	// Generate and validate the commit message using the sticky session ID.
-	text, confidence, err := genMessage(ctx, g.client, diff, g.sessionID)
-	// Return the error if generation or validation fails.
-	if err != nil {
-		return Message{}, err
-	}
-	// Return the validated message and confidence score.
-	return Message{
-		Text:       text,
-		Confidence: confidence,
-	}, nil
+	// Generate and validate the commit message and its completion metadata
+	// using the sticky session ID.
+	return genMessage(ctx, g.client, diff, g.sessionID)
 }
