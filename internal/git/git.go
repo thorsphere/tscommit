@@ -17,6 +17,10 @@ import (
 	"github.com/thorsphere/tserr" // Import the tserr package for error handling.
 )
 
+// TruncatedSuffix is the marker appended by StagedDiff when the staged diff
+// exceeds maxLen characters.
+const TruncatedSuffix = "\n... (truncated)" // The suffix appended to truncated staged diffs.
+
 // gitExec runs a git command with the given arguments, streaming stdout and
 // stderr to the provided writers. It is a seam so unit tests can run without
 // the git binary installed (swapped via SetExecGit in export_test.go).
@@ -88,7 +92,7 @@ func StagedDiff(ctx context.Context, maxLen int) (string, error) {
 	// If the diff exceeds maxLen characters, cut at the character boundary
 	// and append the truncation marker.
 	if r := []rune(diff); len(r) > maxLen {
-		diff = string(r[:maxLen]) + "\n... (truncated)"
+		diff = string(r[:maxLen]) + TruncatedSuffix
 	}
 	// Return the diff and no error to indicate success.
 	return diff, nil
