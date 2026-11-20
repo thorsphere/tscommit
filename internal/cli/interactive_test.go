@@ -149,10 +149,17 @@ type genTurn struct {
 	err error            // The canned error for this call.
 }
 
-// okGen returns a scripted genTurn carrying text and confidence.
+// okGen returns a scripted genTurn carrying text, confidence, and sample
+// completion metadata.
 func okGen(text string, confidence float64) genTurn {
-	// Wrap the text and confidence in a canned message.
-	return genTurn{msg: tscommit.Message{Text: text, Confidence: confidence}}
+	// Wrap the text, confidence, and completion metadata in a canned message.
+	return genTurn{msg: tscommit.Message{
+		Text:        text,
+		Confidence:  confidence,
+		Model:       "google/gemini-4-hydrogen",
+		TotalTokens: 320,
+		Cost:        0.0025,
+	}}
 }
 
 // fakeGenerate implements the generateMessage seam without a provider. It
@@ -257,6 +264,7 @@ func TestRunContext(t *testing.T) {
 			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
+			wantOutText: "Diff: 33 | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
 			input:       "y\n",
 		},
 		{
@@ -270,6 +278,7 @@ func TestRunContext(t *testing.T) {
 			wantCommits: []string{firstMsg},
 			wantCalls:   1,
 			wantConfCnt: 1,
+			wantOutText: "Diff: 100000 (Truncated) | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
 		},
 		{
 			name:        "enter accepts the default choice",
@@ -559,9 +568,13 @@ func TestRunContext(t *testing.T) {
 			if warn := strings.Contains(out, cli.BreakingWarning); warn != tc.wantWarn {
 				t.Errorf("breaking-change warning present = %v, want %v", warn, tc.wantWarn)
 			}
-			// Check how many times the AI confidence line was displayed.
+			// Check how many times the AI summary and confidence lines were displayed.
 			if gotConfCnt := strings.Count(out, "Confidence:"); tc.wantConfCnt >= 0 && gotConfCnt != tc.wantConfCnt {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Confidence line count", Actual: fmt.Sprintf("%d", gotConfCnt), Want: fmt.Sprintf("%d", tc.wantConfCnt)}))
+			}
+			// Check that the AI summary line appears the same number of times as the confidence line.
+			if gotSumCnt := strings.Count(out, "Diff: "); tc.wantConfCnt >= 0 && gotSumCnt != tc.wantConfCnt {
+				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "Summary line count", Actual: fmt.Sprintf("%d", gotSumCnt), Want: fmt.Sprintf("%d", tc.wantConfCnt)}))
 			}
 			// Check for any required output substring.
 			if tc.wantOutText != "" && !strings.Contains(out, tc.wantOutText) {

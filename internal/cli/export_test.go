@@ -23,6 +23,8 @@ const (
 var (
 	NewPrompter        = newPrompter        // NewPrompter is the exported version of the internal newPrompter function.
 	AbortOr            = abortOr            // AbortOr is the exported version of the internal abortOr function.
+	DiffInfo           = diffInfo           // DiffInfo is the exported version of the internal diffInfo function.
+	FormatSummary      = formatSummary      // FormatSummary is the exported version of the internal formatSummary function.
 	PromptUser         = promptUser         // PromptUser is the exported version of the internal promptUser function.
 	BreakingWarning    = breakingWarning    // BreakingWarning is the exported version of the internal breakingWarning variable.
 	WarnBreakingChange = warnBreakingChange // WarnBreakingChange is the exported version of the internal warnBreakingChange function.
