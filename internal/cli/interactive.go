@@ -104,8 +104,10 @@ func Run() error {
 // accept, edit, regenerate, or cancel, and creates the git commit upon
 // acceptance.
 func RunContext(ctx context.Context) error {
+	// Build the default configuration carrying the model and reasoning effort.
+	cfg := tscommit.NewConfig()
 	// Build the non-interactive generator; it validates the provider and API key.
-	gen, err := tscommit.NewGenerator(tscommit.NewConfig())
+	gen, err := tscommit.NewGenerator(cfg)
 	// Return the error if the generator cannot be built.
 	if err != nil {
 		return err
@@ -131,7 +133,7 @@ func RunContext(ctx context.Context) error {
 	// Prompt the user until they accept, edit, regenerate, or cancel.
 	for {
 		// Ask the user what to do with the current message.
-		choice, err := promptUser(ctx, p, res, diffChars, truncated, showAI)
+		choice, err := promptUser(ctx, p, res, cfg.ReasoningEffort(), diffChars, truncated, showAI)
 		// Return the error if prompting fails.
 		if err != nil {
 			return abortOr(ctx, err)
@@ -211,9 +213,9 @@ func diffInfo(diff string) (diffChars int, truncated bool) {
 
 // formatSummary returns the single-line generation summary header displaying
 // diffChars, an optional "(Truncated)" indicator when truncated is true, the
-// serving model from res, the total tokens billed, and the completion cost in
-// USD.
-func formatSummary(diffChars int, truncated bool, res tscommit.Message) string {
+// serving model from res with the reasoning effort effort in brackets after
+// the model name, the total tokens billed, and the completion cost in USD.
+func formatSummary(diffChars int, truncated bool, effort string, res tscommit.Message) string {
 	// Include the truncation tag only when the staged diff was truncated.
 	truncTag := ""
 	// Append the truncation tag when truncated is true.
@@ -228,21 +230,28 @@ func formatSummary(diffChars int, truncated bool, res tscommit.Message) string {
 		// Indicate that no serving model was reported.
 		model = "n/a"
 	}
+	// Fall back to n/a when no reasoning effort was configured.
+	if effort == "" {
+		// Indicate that no explicit reasoning effort was configured.
+		effort = "n/a"
+	}
 	// Render the cost in USD without scientific notation.
 	cost := "$" + strconv.FormatFloat(res.Cost, 'f', -1, 64)
-	// Assemble and return the compact summary header line.
-	return fmt.Sprintf("Diff: %d%s chars | Model: %s | Tokens: %d | Cost: %s", diffChars, truncTag, model, res.TotalTokens, cost)
+	// Assemble and return the compact summary header line with the reasoning
+	// effort in brackets after the model name.
+	return fmt.Sprintf("Diff: %d%s chars | Model: %s (%s) | Tokens: %d | Cost: %s", diffChars, truncTag, model, effort, res.TotalTokens, cost)
 }
 
 // promptUser returns the choice value selected by the user after showing the
-// AI generation summary and confidence score when showAI is true, showing the
+// AI generation summary (with the reasoning effort in brackets after the
+// model name) and confidence score when showAI is true, showing the
 // candidate commit message res.Text, and warning when res.Text carries a
 // breaking-change marker, or an empty string and error if prompting fails.
-func promptUser(ctx context.Context, p *lpcli.Prompter, res tscommit.Message, diffChars int, truncated bool, showAI bool) (string, error) {
+func promptUser(ctx context.Context, p *lpcli.Prompter, res tscommit.Message, effort string, diffChars int, truncated bool, showAI bool) (string, error) {
 	// Show the AI generation summary before the commit message when enabled.
 	if showAI {
 		// Print the compact summary header followed by a blank line.
-		fmt.Fprintf(p.Out(), "%s\n\n", formatSummary(diffChars, truncated, res))
+		fmt.Fprintf(p.Out(), "%s\n\n", formatSummary(diffChars, truncated, effort, res))
 	}
 	// Show the candidate commit message so the user can review it.
 	fmt.Fprintln(p.Out(), res.Text)
