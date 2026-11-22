@@ -512,7 +512,7 @@ func newTestGenerator(t *testing.T) *tscommit.Generator {
 	// Install a valid API key; t.Setenv restores it after the test.
 	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-test-key")
 	// Build the generator under test.
-	gen, err := tscommit.NewGenerator()
+	gen, err := tscommit.NewGenerator(tscommit.NewConfig())
 	// Stop the test if the generator cannot be built.
 	if err != nil {
 		// The retrieval handler cannot be exercised without a generator.
