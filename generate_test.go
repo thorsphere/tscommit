@@ -36,34 +36,65 @@ func sessionIDFrom(t *testing.T, rendered string) string {
 	return value
 }
 
-// TestNewGenerator tests NewGenerator across valid and invalid provider/API-key
-// environment configurations. It uses t.Setenv and must not call t.Parallel.
+// TestNewGenerator tests NewGenerator across valid and invalid Config and
+// provider/API-key environment configurations. It uses t.Setenv and must not
+// call t.Parallel.
 func TestNewGenerator(t *testing.T) {
-	// Define the environment configuration scenarios.
+	// Define the configuration and environment scenarios.
 	cases := []struct {
-		name        string // The scenario name.
-		key         string // The OPENROUTER_API_KEY value installed for the test.
-		wantErr     bool   // Whether construction must fail.
-		wantErrText string // Substring the returned error must contain.
+		name        string           // The scenario name.
+		cfg         *tscommit.Config // The configuration passed to NewGenerator.
+		key         string           // The OPENROUTER_API_KEY value installed for the test.
+		wantErr     bool             // Whether construction must fail.
+		wantErrText string           // Substring the returned error must contain.
 	}{
 		{
-			name: "valid API key builds generator",
+			name: "default config with valid API key builds generator",
+			cfg:  tscommit.NewConfig(),
 			key:  "sk-or-v1-test-key",
 		},
 		{
+			name:        "nil config fails",
+			key:         "sk-or-v1-test-key",
+			wantErr:     true,
+			wantErrText: "config",
+		},
+		{
+			name: "explicit config with valid API key builds generator",
+			cfg:  tscommit.NewConfig().WithModel("openai/gpt-5").WithReasoningEffort("low"),
+			key:  "sk-or-v1-test-key",
+		},
+		{
+			name:        "invalid model fails",
+			cfg:         tscommit.NewConfig().WithModel(""),
+			key:         "sk-or-v1-test-key",
+			wantErr:     true,
+			wantErrText: "new config",
+		},
+		{
+			name:        "invalid reasoning effort fails",
+			cfg:         tscommit.NewConfig().WithReasoningEffort("bogus"),
+			key:         "sk-or-v1-test-key",
+			wantErr:     true,
+			wantErrText: "new client",
+		},
+		{
 			name:        "missing API key fails",
+			cfg:         tscommit.NewConfig(),
 			key:         "",
 			wantErr:     true,
 			wantErrText: "new client",
 		},
 		{
 			name:        "whitespace API key fails",
+			cfg:         tscommit.NewConfig(),
 			key:         "   \t\n",
 			wantErr:     true,
 			wantErrText: "new client",
 		},
 		{
 			name:        "control character in API key fails",
+			cfg:         tscommit.NewConfig(),
 			key:         "bad\nkey",
 			wantErr:     true,
 			wantErrText: "new client",
@@ -75,7 +106,7 @@ func TestNewGenerator(t *testing.T) {
 			// Install the scenario API key; t.Setenv restores it after the subtest.
 			t.Setenv("OPENROUTER_API_KEY", tc.key)
 			// Construct the generator under test.
-			gen, err := tscommit.NewGenerator()
+			gen, err := tscommit.NewGenerator(tc.cfg)
 			// Check the error expectation.
 			if tc.wantErr {
 				// Fail if an expected error is missing.
@@ -246,8 +277,8 @@ func TestGeneratorGenerate(t *testing.T) {
 				// Use an uninitialized Generator literal to exercise the zero-value guard.
 				gen = &tscommit.Generator{}
 			default:
-				// Construct a valid generator via NewGenerator.
-				built, err := tscommit.NewGenerator()
+				// Construct a valid generator via NewGenerator with default config.
+				built, err := tscommit.NewGenerator(tscommit.NewConfig())
 				// Fail if setup construction unexpectedly fails.
 				if err != nil {
 					t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "NewGenerator", Err: err}))
