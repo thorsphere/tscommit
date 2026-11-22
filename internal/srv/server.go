@@ -117,7 +117,7 @@ func NewCommitServer(tok string) (*CommitServer, error) {
 		return nil, tserr.Empty("token")
 	}
 	// Build the non-interactive generator; construction validates the provider and API key.
-	gen, err := tscommit.NewGenerator()
+	gen, err := tscommit.NewGenerator(tscommit.NewConfig())
 	// If the generator cannot be built, log and return the error.
 	if err != nil {
 		// Log the generator construction failure.
