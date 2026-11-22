@@ -31,14 +31,14 @@ func TestConfig(t *testing.T) {
 			cfg:        tscommit.NewConfig(),
 			apply:      func(cfg *tscommit.Config) *tscommit.Config { return cfg },
 			wantModel:  "google/gemini-4-hydrogen",
-			wantEffort: "high",
+			wantEffort: "low",
 		},
 		{
 			name:       "WithModel trims surrounding whitespace",
 			cfg:        tscommit.NewConfig(),
 			apply:      func(cfg *tscommit.Config) *tscommit.Config { return cfg.WithModel("  openai/gpt-5  ") },
 			wantModel:  "openai/gpt-5",
-			wantEffort: "high",
+			wantEffort: "low",
 		},
 		{
 			name:       "WithReasoningEffort trims surrounding whitespace",
