@@ -40,12 +40,17 @@ type Generator struct {
 	sessionID string             // The sticky routing key shared across calls on this generator.
 }
 
-// NewGenerator returns a Generator configured from the environment with a
-// freshly minted sticky routing key, or an error if the AI provider or API key
-// configuration is invalid.
-func NewGenerator() (*Generator, error) {
+// NewGenerator returns a Generator configured with cfg and the environment
+// API key alongside a freshly minted sticky routing key, or an error if cfg
+// is nil, the AI provider is misconfigured, or the API key configuration is
+// invalid. A nil cfg is rejected; callers must pass at least NewConfig.
+func NewGenerator(cfg *Config) (*Generator, error) {
+	// Return an error if cfg is nil instead of silently defaulting.
+	if cfg == nil {
+		return nil, tserr.Empty("config")
+	}
 	// Build the AI client; construction validates the provider and API key.
-	client, err := newClient()
+	client, err := newClient(cfg)
 	// Return the error if the AI client cannot be built.
 	if err != nil {
 		return nil, err
