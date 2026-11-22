@@ -105,7 +105,7 @@ func Run() error {
 // acceptance.
 func RunContext(ctx context.Context) error {
 	// Build the non-interactive generator; it validates the provider and API key.
-	gen, err := tscommit.NewGenerator()
+	gen, err := tscommit.NewGenerator(tscommit.NewConfig())
 	// Return the error if the generator cannot be built.
 	if err != nil {
 		return err
