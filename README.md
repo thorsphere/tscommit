@@ -173,9 +173,37 @@ func Run() error
 // RunContext executes the tscommit workflow with the provided context.
 func RunContext(ctx context.Context) error
 
-// NewGenerator returns a Generator configured from the environment with a
-// freshly minted sticky routing key.
-func NewGenerator() (*Generator, error)
+// Config carries the AI provider settings for commit message generation:
+// the model identifier and the reasoning effort level. The zero value is
+// not usable; construct instances with NewConfig.
+type Config struct {
+    model           string // The model identifier passed to the AI provider.
+    reasoningEffort string // The reasoning effort level passed to the AI provider.
+}
+
+// NewConfig returns a Config populated with the package defaults: the
+// default model identifier and the default reasoning effort level.
+func NewConfig() *Config
+
+// WithModel sets the model identifier, trimmed of surrounding whitespace,
+// and returns cfg.
+func (cfg *Config) WithModel(model string) *Config
+
+// WithReasoningEffort sets the reasoning effort level, trimmed of
+// surrounding whitespace, and returns cfg.
+func (cfg *Config) WithReasoningEffort(effort string) *Config
+
+// Model returns the configured model identifier ("" when cfg is nil).
+func (cfg *Config) Model() string
+
+// ReasoningEffort returns the configured reasoning effort level ("" when
+// cfg is nil).
+func (cfg *Config) ReasoningEffort() string
+
+// NewGenerator returns a Generator configured with cfg and the environment
+// API key alongside a freshly minted sticky routing key. cfg must be
+// non-nil; pass at least NewConfig().
+func NewGenerator(cfg *Config) (*Generator, error)
 
 // Message holds a generated Conventional Commits message, its model
 // confidence score, and completion metadata (Model, TotalTokens, Cost).
@@ -225,7 +253,7 @@ import (
 )
 
 func main() {
-    gen, err := tscommit.NewGenerator()
+    gen, err := tscommit.NewGenerator(tscommit.NewConfig())
     if err != nil {
         panic(err)
     }
