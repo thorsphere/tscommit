@@ -73,7 +73,7 @@ func TestPromptUserSelects(t *testing.T) {
 				Cost:        0.0025,
 			}
 			// Invoke promptUser with AI metadata display enabled.
-			got, err := cli.PromptUser(context.Background(), p, res, 1420, false, true)
+			got, err := cli.PromptUser(context.Background(), p, res, "high", 1420, false, true)
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -84,7 +84,7 @@ func TestPromptUserSelects(t *testing.T) {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "promptUser", Actual: got, Want: tc.want}))
 			}
 			// The generation summary line must appear before the candidate message.
-			wantSummary := "Diff: 1420 chars | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025"
+			wantSummary := "Diff: 1420 chars | Model: google/gemini-4-hydrogen (high) | Tokens: 320 | Cost: $0.0025"
 			// Fail when the summary line is missing from the output.
 			if !strings.Contains(buf.String(), wantSummary) {
 				t.Errorf("output %q does not show the summary line %q", buf.String(), wantSummary)
@@ -140,7 +140,7 @@ func TestPromptUserWarns(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			_, err := cli.PromptUser(context.Background(), p, tscommit.Message{Text: tc.msg, Confidence: 0.85, Model: "m1"}, 42, false, true)
+			_, err := cli.PromptUser(context.Background(), p, tscommit.Message{Text: tc.msg, Confidence: 0.85, Model: "m1"}, "high", 42, false, true)
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -226,7 +226,7 @@ func TestPromptUserErrors(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			got, err := cli.PromptUser(tc.ctx, p, tscommit.Message{Text: "feat(x): xyz", Confidence: 0.9}, 42, false, true)
+			got, err := cli.PromptUser(tc.ctx, p, tscommit.Message{Text: "feat(x): xyz", Confidence: 0.9}, "high", 42, false, true)
 			// If no error was returned, fail the test.
 			if err == nil {
 				t.Error(tserr.NilFailed("promptUser"))
@@ -248,16 +248,18 @@ func TestPromptUserConfidence(t *testing.T) {
 	cases := []struct {
 		name        string  // The scenario name.
 		confidence  float64 // The confidence score supplied to promptUser.
+		effort      string  // The reasoning effort supplied to promptUser.
 		truncated   bool    // Whether the staged diff was truncated.
 		showAI      bool    // Whether AI summary and confidence display is enabled.
 		wantSummary string  // The expected rendered summary header; empty when omitted.
 		wantLine    string  // The expected rendered confidence line; empty when omitted.
 	}{
-		{"shown as rounded percentage", 0.924, false, true, "Diff: 500 chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 92%"},
-		{"shown with truncated diff", 0.5, true, true, "Diff: 500 (Truncated) chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 50%"},
-		{"shown at zero boundary", 0, false, true, "Diff: 500 chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 0%"},
-		{"shown at max boundary", 1.0, false, true, "Diff: 500 chars | Model: m1 | Tokens: 80 | Cost: $0.001", "Confidence: 100%"},
-		{"omitted when disabled", 0.92, true, false, "", ""},
+		{name: "shown as rounded percentage", confidence: 0.924, effort: "high", showAI: true, wantSummary: "Diff: 500 chars | Model: m1 (high) | Tokens: 80 | Cost: $0.001", wantLine: "Confidence: 92%"},
+		{name: "shown with truncated diff", confidence: 0.5, effort: "high", truncated: true, showAI: true, wantSummary: "Diff: 500 (Truncated) chars | Model: m1 (high) | Tokens: 80 | Cost: $0.001", wantLine: "Confidence: 50%"},
+		{name: "shown at zero boundary", confidence: 0, effort: "high", showAI: true, wantSummary: "Diff: 500 chars | Model: m1 (high) | Tokens: 80 | Cost: $0.001", wantLine: "Confidence: 0%"},
+		{name: "shown at max boundary", confidence: 1.0, effort: "high", showAI: true, wantSummary: "Diff: 500 chars | Model: m1 (high) | Tokens: 80 | Cost: $0.001", wantLine: "Confidence: 100%"},
+		{name: "empty effort falls back to n/a", confidence: 0.5, effort: "", showAI: true, wantSummary: "Diff: 500 chars | Model: m1 (n/a) | Tokens: 80 | Cost: $0.001", wantLine: "Confidence: 50%"},
+		{name: "omitted when disabled", confidence: 0.92, effort: "high", truncated: true, showAI: false, wantSummary: "", wantLine: ""},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
@@ -287,7 +289,7 @@ func TestPromptUserConfidence(t *testing.T) {
 				Cost:        0.001,
 			}
 			// Execute promptUser under test.
-			if _, err := cli.PromptUser(context.Background(), p, res, 500, tc.truncated, tc.showAI); err != nil {
+			if _, err := cli.PromptUser(context.Background(), p, res, tc.effort, 500, tc.truncated, tc.showAI); err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
 				return
 			}
@@ -373,7 +375,8 @@ func TestDiffInfo(t *testing.T) {
 }
 
 // TestFormatSummary tests that formatSummary renders diff character count,
-// optional truncation indicator, model fallback, billed tokens, and non-scientific
+// optional truncation indicator, model fallback, the reasoning effort in
+// brackets after the model name, billed tokens, and non-scientific
 // USD cost.
 func TestFormatSummary(t *testing.T) {
 	// Define the test cases.
@@ -381,6 +384,7 @@ func TestFormatSummary(t *testing.T) {
 		name      string           // The scenario name.
 		diffChars int              // The diff character count.
 		truncated bool             // Whether the diff was truncated.
+		effort    string           // The configured reasoning effort.
 		res       tscommit.Message // The generation result metadata.
 		want      string           // The expected summary line.
 	}{
@@ -388,36 +392,48 @@ func TestFormatSummary(t *testing.T) {
 			name:      "full metadata without truncation",
 			diffChars: 1420,
 			truncated: false,
+			effort:    "high",
 			res:       tscommit.Message{Model: "google/gemini-4-hydrogen", TotalTokens: 320, Cost: 0.0025},
-			want:      "Diff: 1420 chars | Model: google/gemini-4-hydrogen | Tokens: 320 | Cost: $0.0025",
+			want:      "Diff: 1420 chars | Model: google/gemini-4-hydrogen (high) | Tokens: 320 | Cost: $0.0025",
 		},
 		{
 			name:      "truncated diff adds marker",
 			diffChars: 100000,
 			truncated: true,
+			effort:    "low",
 			res:       tscommit.Message{Model: "openai/gpt-5", TotalTokens: 1500, Cost: 0.015},
-			want:      "Diff: 100000 (Truncated) chars | Model: openai/gpt-5 | Tokens: 1500 | Cost: $0.015",
+			want:      "Diff: 100000 (Truncated) chars | Model: openai/gpt-5 (low) | Tokens: 1500 | Cost: $0.015",
 		},
 		{
 			name:      "unreported metadata uses n/a and zero cost without scientific notation",
 			diffChars: 42,
 			truncated: false,
+			effort:    "",
 			res:       tscommit.Message{},
-			want:      "Diff: 42 chars | Model: n/a | Tokens: 0 | Cost: $0",
+			want:      "Diff: 42 chars | Model: n/a (n/a) | Tokens: 0 | Cost: $0",
+		},
+		{
+			name:      "empty effort falls back to n/a after the model",
+			diffChars: 80,
+			truncated: false,
+			effort:    "",
+			res:       tscommit.Message{Model: "m1", TotalTokens: 12, Cost: 0.000042},
+			want:      "Diff: 80 chars | Model: m1 (n/a) | Tokens: 12 | Cost: $0.000042",
 		},
 		{
 			name:      "sub-cent micro cost avoids scientific notation",
 			diffChars: 80,
 			truncated: false,
+			effort:    "medium",
 			res:       tscommit.Message{Model: "m1", TotalTokens: 12, Cost: 0.000042},
-			want:      "Diff: 80 chars | Model: m1 | Tokens: 12 | Cost: $0.000042",
+			want:      "Diff: 80 chars | Model: m1 (medium) | Tokens: 12 | Cost: $0.000042",
 		},
 	}
 	// Run the test cases.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Render the summary line under test.
-			got := cli.FormatSummary(tc.diffChars, tc.truncated, tc.res)
+			got := cli.FormatSummary(tc.diffChars, tc.truncated, tc.effort, tc.res)
 			// Compare the rendered summary against the expected string.
 			if got != tc.want {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "formatSummary", Actual: got, Want: tc.want}))
