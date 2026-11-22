@@ -114,7 +114,7 @@ You will be shown the generation summary, the generated message, and asked
 what to do:
 
 ```sh
-Diff: 1420 chars | Model: google/gemini-3-flash-preview | Tokens: 412 | Cost: $0.00031
+Diff: 1420 chars | Model: google/gemini-3-flash-preview (low) | Tokens: 412 | Cost: $0.00031
 
 feat(git): add staged-diff truncation
 
@@ -156,7 +156,7 @@ files.
 | `EDITOR` | no | Editor opened for the `edit` action (inherited from your shell/git setup). |
 
 Generation defaults are fixed for consistency: max 16,000 completion
-tokens, temperature 0.3, medium reasoning effort, and a 3-minute request
+tokens, temperature 0.3, low reasoning effort, and a 2-minute request
 timeout.
 
 ---
