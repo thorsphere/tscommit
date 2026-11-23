@@ -22,7 +22,6 @@ const (
 	MaxGenerateDuration        = maxGenAttempts * DefaultTimeout
 	defaultModel               = "google/gemini-4-hydrogen" // The default model identifier.
 	defaultMaxCompletionTokens = 16000                      // The default cap on generated tokens.
-	defaultTemperature         = 0.3                        // The default sampling temperature.
 	defaultReasoningEffort     = "low"                      // The default reasoning effort level.
 	maxGenAttempts             = 2                          // The maximum number of provider calls per message (1 initial + retries with feedback).
 	minConfidence              = 0.0                        // The minimum allowed confidence score.
@@ -112,7 +111,6 @@ func newClient(cfg *Config) (*tsaiclient.Client, error) {
 	}
 	// Apply the generation defaults used for commit messages.
 	aiCfg = aiCfg.WithMaxCompletionTokens(defaultMaxCompletionTokens).
-		WithTemperature(defaultTemperature).
 		WithReasoningEffort(cfg.reasoningEffort).
 		WithTimeout(DefaultTimeout)
 	// Build the OpenRouter provider with app attribution headers.
