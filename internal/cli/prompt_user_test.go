@@ -73,7 +73,12 @@ func TestPromptUserSelects(t *testing.T) {
 				Cost:        0.0025,
 			}
 			// Invoke promptUser with AI metadata display enabled.
-			got, err := cli.PromptUser(context.Background(), p, res, "high", 1420, false, true)
+			got, err := cli.PromptUser(context.Background(), p, cli.PromptParams{
+				Message:   res,
+				Effort:    "high",
+				DiffChars: 1420,
+				ShowAI:    true,
+			})
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -140,7 +145,12 @@ func TestPromptUserWarns(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			_, err := cli.PromptUser(context.Background(), p, tscommit.Message{Text: tc.msg, Confidence: 0.85, Model: "m1"}, "high", 42, false, true)
+			_, err := cli.PromptUser(context.Background(), p, cli.PromptParams{
+				Message:   tscommit.Message{Text: tc.msg, Confidence: 0.85, Model: "m1"},
+				Effort:    "high",
+				DiffChars: 42,
+				ShowAI:    true,
+			})
 			// If prompting failed, fail the test.
 			if err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
@@ -226,7 +236,12 @@ func TestPromptUserErrors(t *testing.T) {
 				return
 			}
 			// Call the function under test.
-			got, err := cli.PromptUser(tc.ctx, p, tscommit.Message{Text: "feat(x): xyz", Confidence: 0.9}, "high", 42, false, true)
+			got, err := cli.PromptUser(tc.ctx, p, cli.PromptParams{
+				Message:   tscommit.Message{Text: "feat(x): xyz", Confidence: 0.9},
+				Effort:    "high",
+				DiffChars: 42,
+				ShowAI:    true,
+			})
 			// If no error was returned, fail the test.
 			if err == nil {
 				t.Error(tserr.NilFailed("promptUser"))
@@ -289,7 +304,13 @@ func TestPromptUserConfidence(t *testing.T) {
 				Cost:        0.001,
 			}
 			// Execute promptUser under test.
-			if _, err := cli.PromptUser(context.Background(), p, res, tc.effort, 500, tc.truncated, tc.showAI); err != nil {
+			if _, err := cli.PromptUser(context.Background(), p, cli.PromptParams{
+				Message:   res,
+				Effort:    tc.effort,
+				DiffChars: 500,
+				Truncated: tc.truncated,
+				ShowAI:    tc.showAI,
+			}); err != nil {
 				t.Error(tserr.NilExpected(&tserr.NilExpectedArgs{Op: "promptUser", Err: err}))
 				return
 			}
@@ -433,7 +454,12 @@ func TestFormatSummary(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Render the summary line under test.
-			got := cli.FormatSummary(tc.diffChars, tc.truncated, tc.effort, tc.res)
+			got := cli.FormatSummary(cli.PromptParams{
+				Message:   tc.res,
+				Effort:    tc.effort,
+				DiffChars: tc.diffChars,
+				Truncated: tc.truncated,
+			})
 			// Compare the rendered summary against the expected string.
 			if got != tc.want {
 				t.Error(tserr.EqualStr(&tserr.EqualStrArgs{Var: "formatSummary", Actual: got, Want: tc.want}))

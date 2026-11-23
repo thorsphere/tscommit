@@ -12,6 +12,9 @@ import (
 	"github.com/thorsphere/tscommit" // Import the tscommit package for the generation seam types.
 )
 
+// PromptParams exposes promptParams to the external test package.
+type PromptParams = promptParams
+
 // The choice values promptUser returns, bridged for the external test package.
 const (
 	ChoiceAccept     = choiceAccept     // The user chose to commit.
