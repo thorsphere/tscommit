@@ -19,6 +19,15 @@ import (
 	"github.com/thorsphere/tserr"                 // Import the tserr package for error reporting.
 )
 
+// promptParams holds the candidate message and display settings for a commit prompt.
+type promptParams struct {
+	Message   tscommit.Message // The candidate commit message and AI completion metadata.
+	Effort    string           // The configured reasoning effort level.
+	DiffChars int              // The staged diff length in characters (runes).
+	Truncated bool             // Whether the staged diff hit the character limit.
+	ShowAI    bool             // Whether to display the AI summary header and confidence score.
+}
+
 // The choices the user can select when prompting for commit action.
 const (
 	choiceAccept     string = "accept"     // The default choice is to commit.
@@ -128,12 +137,18 @@ func RunContext(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Track whether the current message came directly from the AI model.
-	showAI := true
+	// Set the initial candidate and enable the AI summary and confidence display.
+	params := promptParams{
+		Message:   res,
+		Effort:    cfg.ReasoningEffort(),
+		DiffChars: diffChars,
+		Truncated: truncated,
+		ShowAI:    true,
+	}
 	// Prompt the user until they accept, edit, regenerate, or cancel.
 	for {
 		// Ask the user what to do with the current message.
-		choice, err := promptUser(ctx, p, res, cfg.ReasoningEffort(), diffChars, truncated, showAI)
+		choice, err := promptUser(ctx, p, params)
 		// Return the error if prompting fails.
 		if err != nil {
 			return abortOr(ctx, err)
@@ -142,27 +157,29 @@ func RunContext(ctx context.Context) error {
 		switch choice {
 		case choiceAccept:
 			// Create the git commit with the current message.
-			return commit(ctx, res.Text)
+			return commit(ctx, params.Message.Text)
 		case choiceEdit:
 			// Open the message in the user's editor.
-			edited, err := editInEditor(ctx, p, res.Text)
+			edited, err := editInEditor(ctx, p, params.Message.Text)
 			// Return the error if editing fails.
 			if err != nil {
 				return abortOr(ctx, err)
 			}
 			// Adopt the user's edit as the active commit message; it is authoritative.
-			res.Text = edited
+			params.Message.Text = edited
 			// Omit the AI generation summary and confidence score once the user has edited the message.
-			showAI = false
+			params.ShowAI = false
 		case choiceRegenerate:
 			// Generate a fresh message and completion metadata on the same generator.
-			res, err = generateMessage(ctx, gen, diff)
+			res, err := generateMessage(ctx, gen, diff)
 			// Return the error if message generation fails.
 			if err != nil {
 				return abortOr(ctx, err)
 			}
+			// Replace the candidate message and completion metadata with the fresh result.
+			params.Message = res
 			// Re-enable the AI summary and confidence display for the newly generated message.
-			showAI = true
+			params.ShowAI = true
 		case choiceCancel:
 			// Return an aborted error when the user cancels.
 			return tserr.Aborted("commit")
@@ -211,59 +228,57 @@ func diffInfo(diff string) (diffChars int, truncated bool) {
 	return utf8.RuneCountInString(trimmed), wasTruncated
 }
 
-// formatSummary returns the single-line generation summary header displaying
-// diffChars, an optional "(Truncated)" indicator when truncated is true, the
-// serving model from res with the reasoning effort effort in brackets after
-// the model name, the total tokens billed, and the completion cost in USD.
-func formatSummary(diffChars int, truncated bool, effort string, res tscommit.Message) string {
+// formatSummary returns the single-line generation summary header for params:
+// the diff character count with an optional truncation indicator, the serving
+// model with reasoning effort in parentheses, billed tokens, and cost in USD.
+func formatSummary(params promptParams) string {
 	// Include the truncation tag only when the staged diff was truncated.
 	truncTag := ""
-	// Append the truncation tag when truncated is true.
-	if truncated {
+	// Append the truncation tag when params.Truncated is true.
+	if params.Truncated {
 		// Mark that the staged diff hit the character limit.
 		truncTag = " (Truncated)"
 	}
 	// Fall back to n/a when the provider did not report a serving model.
-	model := res.Model
+	model := params.Message.Model
 	// Replace an empty model identifier with the fallback label.
 	if model == "" {
 		// Indicate that no serving model was reported.
 		model = "n/a"
 	}
 	// Fall back to n/a when no reasoning effort was configured.
-	if effort == "" {
+	if params.Effort == "" {
 		// Indicate that no explicit reasoning effort was configured.
-		effort = "n/a"
+		params.Effort = "n/a"
 	}
 	// Render the cost in USD without scientific notation.
-	cost := "$" + strconv.FormatFloat(res.Cost, 'f', -1, 64)
+	cost := "$" + strconv.FormatFloat(params.Message.Cost, 'f', -1, 64)
 	// Assemble and return the compact summary header line with the reasoning
 	// effort in brackets after the model name.
-	return fmt.Sprintf("Diff: %d%s chars | Model: %s (%s) | Tokens: %d | Cost: %s", diffChars, truncTag, model, effort, res.TotalTokens, cost)
+	return fmt.Sprintf("Diff: %d%s chars | Model: %s (%s) | Tokens: %d | Cost: %s", params.DiffChars, truncTag, model, params.Effort, params.Message.TotalTokens, cost)
 }
 
-// promptUser returns the choice value selected by the user after showing the
-// AI generation summary (with the reasoning effort in brackets after the
-// model name) and confidence score when showAI is true, showing the
-// candidate commit message res.Text, and warning when res.Text carries a
-// breaking-change marker, or an empty string and error if prompting fails.
-func promptUser(ctx context.Context, p *lpcli.Prompter, res tscommit.Message, effort string, diffChars int, truncated bool, showAI bool) (string, error) {
+// promptUser returns the user's selected choice after displaying the candidate
+// commit message from params, the AI summary and confidence score if
+// params.ShowAI is true, and a warning if the message declares a breaking
+// change. It returns an empty choice and an error if prompting fails.
+func promptUser(ctx context.Context, p *lpcli.Prompter, params promptParams) (string, error) {
 	// Show the AI generation summary before the commit message when enabled.
-	if showAI {
+	if params.ShowAI {
 		// Print the compact summary header followed by a blank line.
-		fmt.Fprintf(p.Out(), "%s\n\n", formatSummary(diffChars, truncated, effort, res))
+		fmt.Fprintf(p.Out(), "%s\n\n", formatSummary(params))
 	}
 	// Show the candidate commit message so the user can review it.
-	fmt.Fprintln(p.Out(), res.Text)
+	fmt.Fprintln(p.Out(), params.Message.Text)
 	// Separate the message from the metadata, warning, and prompt for readability.
 	fmt.Fprintln(p.Out())
 	// Display the AI confidence score when the message came from the model.
-	if showAI {
+	if params.ShowAI {
 		// Print the confidence score as a rounded integer percentage.
-		fmt.Fprintf(p.Out(), "Confidence: %.0f%%\n\n", res.Confidence*100)
+		fmt.Fprintf(p.Out(), "Confidence: %.0f%%\n\n", params.Message.Confidence*100)
 	}
 	// Warn the user if the message contains a breaking-change marker.
-	warnBreakingChange(p, res.Text)
+	warnBreakingChange(p, params.Message.Text)
 	// Ask the user what to do via the selection seam.
 	choice, err := selectChoice(ctx, p, lpcli.SelectOptions{
 		Message: "Apply this commit?",
