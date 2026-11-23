@@ -4,9 +4,12 @@ go 1.27
 
 require (
 	github.com/thorsphere/lpcli v1.0.3
-	github.com/thorsphere/tsaiclient v1.0.2
+	github.com/thorsphere/tsaiclient v1.0.3
 	github.com/thorsphere/tserr v1.21.11
 	github.com/thorsphere/tslog v1.4.0
 )
 
-require github.com/thorsphere/tsfio v1.9.0 // indirect
+require (
+	github.com/thorsphere/lpstats v1.6.2 // indirect
+	github.com/thorsphere/tsfio v1.9.0 // indirect
+)
